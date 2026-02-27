@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai"
 )
 
 func addMsg(t *testing.T, sess *Session, role string, text string) string {

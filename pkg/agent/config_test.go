@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nickcecere/agent/pkg/agent"
+	"github.com/bitop-dev/agent/pkg/agent"
 )
 
 func writeConfig(t *testing.T, content string) string {

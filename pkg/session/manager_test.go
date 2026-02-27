@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/session"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/session"
 )
 
 func createAndPopulate(t *testing.T, dir string) *session.Session {

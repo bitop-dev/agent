@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/ai/providers/openai"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai/providers/openai"
 )
 
 const defaultAPIVersion = "2024-12-01-preview"

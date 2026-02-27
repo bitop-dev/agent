@@ -15,11 +15,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/nickcecere/agent/pkg/agent"
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/ai/providers/openai"
-	"github.com/nickcecere/agent/pkg/tools"
-	"github.com/nickcecere/agent/pkg/tools/builtin"
+	"github.com/bitop-dev/agent/pkg/agent"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai/providers/openai"
+	"github.com/bitop-dev/agent/pkg/tools"
+	"github.com/bitop-dev/agent/pkg/tools/builtin"
 )
 
 const systemPrompt = `You are a research assistant with access to web search and web fetch tools.

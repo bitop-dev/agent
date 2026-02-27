@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/ai/sse"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai/sse"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1"

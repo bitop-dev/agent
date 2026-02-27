@@ -76,8 +76,8 @@ import (
     "net/http"
     "os"
 
-    "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
-    "github.com/nickcecere/agent/pkg/ai/providers/proxy"
+    "github.com/bitop-dev/agent/pkg/ai/providers/anthropic"
+    "github.com/bitop-dev/agent/pkg/ai/providers/proxy"
 )
 
 func main() {
@@ -118,7 +118,7 @@ tools:
 ### Go code
 
 ```go
-import "github.com/nickcecere/agent/pkg/ai/providers/proxy"
+import "github.com/bitop-dev/agent/pkg/ai/providers/proxy"
 
 client := proxy.New("http://localhost:8080", os.Getenv("PROXY_TOKEN"))
 // use client as ai.Provider

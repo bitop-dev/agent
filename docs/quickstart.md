@@ -8,7 +8,7 @@
 ## Install
 
 ```bash
-git clone https://github.com/nickcecere/agent
+git clone https://github.com/bitop-dev/agent
 cd agent
 go build -o agent ./cmd/agent
 ```
@@ -16,7 +16,7 @@ go build -o agent ./cmd/agent
 Or install directly:
 
 ```bash
-go install github.com/nickcecere/agent/cmd/agent@latest
+go install github.com/bitop-dev/agent/cmd/agent@latest
 ```
 
 ## Your First Config

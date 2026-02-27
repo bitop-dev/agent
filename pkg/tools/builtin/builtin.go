@@ -1,7 +1,7 @@
 package builtin
 
 import (
-	"github.com/nickcecere/agent/pkg/tools"
+	"github.com/bitop-dev/agent/pkg/tools"
 )
 
 // Preset selects which built-in tools are registered.

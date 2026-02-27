@@ -115,7 +115,7 @@ find the right metadata.
 ## Using the Registry in Go
 
 ```go
-import "github.com/nickcecere/agent/pkg/ai/models"
+import "github.com/bitop-dev/agent/pkg/ai/models"
 
 // Lookup by ID (fuzzy)
 info := models.Lookup("claude-sonnet-4-5-20251219")

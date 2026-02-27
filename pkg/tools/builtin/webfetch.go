@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/net/html"
 
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/tools"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/tools"
 )
 
 // WebFetchTool fetches a URL and returns its content as clean plain text.

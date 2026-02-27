@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nickcecere/agent/pkg/tools/builtin"
+	"github.com/bitop-dev/agent/pkg/tools/builtin"
 )
 
 func writeTool(t *testing.T, cwd, path, content string) string {

@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/ai/sse"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai/sse"
 )
 
 // ResponsesProvider streams via the OpenAI Responses API.

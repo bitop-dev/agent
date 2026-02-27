@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/tools"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/tools"
 )
 
 // stubTool is a minimal Tool implementation for testing the registry.

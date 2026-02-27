@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai"
 )
 
 // EventConfigReloaded is broadcast when the config file is reloaded.

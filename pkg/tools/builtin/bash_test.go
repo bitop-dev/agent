@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/tools/builtin"
+	"github.com/bitop-dev/agent/pkg/tools/builtin"
 )
 
 func bashRun(t *testing.T, cmd string, extra ...map[string]any) string {

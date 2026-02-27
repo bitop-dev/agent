@@ -7,7 +7,7 @@ package agent
 import (
 	"encoding/json"
 
-	"github.com/nickcecere/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai"
 )
 
 // EstimateContextTokens estimates the total token count of the given message

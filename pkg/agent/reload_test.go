@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/agent"
-	"github.com/nickcecere/agent/pkg/tools"
+	"github.com/bitop-dev/agent/pkg/agent"
+	"github.com/bitop-dev/agent/pkg/tools"
 )
 
 func writeYAML(t *testing.T, dir, content string) string {

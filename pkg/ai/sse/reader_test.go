@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nickcecere/agent/pkg/ai/sse"
+	"github.com/bitop-dev/agent/pkg/ai/sse"
 )
 
 func events(input string) []sse.Event {

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/tools"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/tools"
 )
 
 // BashTool executes shell commands and streams their output.

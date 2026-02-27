@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/nickcecere/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai"
 )
 
 // stubTool is a minimal Tool for testing ValidateAndCoerce.

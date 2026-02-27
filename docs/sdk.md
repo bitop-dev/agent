@@ -8,7 +8,7 @@ directly — no CLI required.
 ## Module
 
 ```bash
-go get github.com/nickcecere/agent
+go get github.com/bitop-dev/agent
 ```
 
 ---
@@ -23,11 +23,11 @@ import (
     "fmt"
     "os"
 
-    "github.com/nickcecere/agent/pkg/agent"
-    "github.com/nickcecere/agent/pkg/ai"
-    "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
-    "github.com/nickcecere/agent/pkg/tools"
-    "github.com/nickcecere/agent/pkg/tools/builtin"
+    "github.com/bitop-dev/agent/pkg/agent"
+    "github.com/bitop-dev/agent/pkg/ai"
+    "github.com/bitop-dev/agent/pkg/ai/providers/anthropic"
+    "github.com/bitop-dev/agent/pkg/tools"
+    "github.com/bitop-dev/agent/pkg/tools/builtin"
 )
 
 func main() {
@@ -568,7 +568,7 @@ All providers serialize `ImageContent` automatically:
 ## Session Persistence
 
 ```go
-import "github.com/nickcecere/agent/pkg/session"
+import "github.com/bitop-dev/agent/pkg/session"
 
 dir := filepath.Join(os.UserHomeDir(), ".config", "agent", "sessions")
 sess, err := session.Create(dir, cwd)
@@ -617,8 +617,8 @@ a.Subscribe(func(e agent.Event) {
 ```go
 import (
     "net/http"
-    "github.com/nickcecere/agent/pkg/ai/providers/proxy"
-    "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
+    "github.com/bitop-dev/agent/pkg/ai/providers/proxy"
+    "github.com/bitop-dev/agent/pkg/ai/providers/anthropic"
 )
 
 upstream := anthropic.New(os.Getenv("ANTHROPIC_API_KEY"))
@@ -669,11 +669,11 @@ import (
     "os"
     "time"
 
-    "github.com/nickcecere/agent/pkg/agent"
-    "github.com/nickcecere/agent/pkg/ai"
-    "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
-    "github.com/nickcecere/agent/pkg/tools"
-    "github.com/nickcecere/agent/pkg/tools/builtin"
+    "github.com/bitop-dev/agent/pkg/agent"
+    "github.com/bitop-dev/agent/pkg/ai"
+    "github.com/bitop-dev/agent/pkg/ai/providers/anthropic"
+    "github.com/bitop-dev/agent/pkg/tools"
+    "github.com/bitop-dev/agent/pkg/tools/builtin"
 )
 
 func main() {

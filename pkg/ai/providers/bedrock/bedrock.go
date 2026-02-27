@@ -26,7 +26,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	brdoc "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
-	"github.com/nickcecere/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai"
 )
 
 // Provider is the Amazon Bedrock streaming provider.

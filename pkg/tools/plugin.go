@@ -29,7 +29,7 @@ import (
 	"os/exec"
 	"sync"
 
-	"github.com/nickcecere/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai"
 )
 
 // pluginTool wraps a subprocess plugin as a Tool.

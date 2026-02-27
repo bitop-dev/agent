@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/ai/models"
-	"github.com/nickcecere/agent/pkg/tools"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai/models"
+	"github.com/bitop-dev/agent/pkg/tools"
 )
 
 // ---------------------------------------------------------------------------

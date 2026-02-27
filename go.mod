@@ -1,4 +1,4 @@
-module github.com/nickcecere/agent
+module github.com/bitop-dev/agent
 
 go 1.25.0
 

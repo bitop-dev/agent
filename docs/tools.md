@@ -269,7 +269,7 @@ result, for example:
 The `builtin` package exposes helpers for use in your own tools:
 
 ```go
-import "github.com/nickcecere/agent/pkg/tools/builtin"
+import "github.com/bitop-dev/agent/pkg/tools/builtin"
 
 tr := builtin.TruncateHead(output, maxLines, maxBytes)
 // tr.Content   — truncated text
@@ -292,8 +292,8 @@ import (
     "context"
     "fmt"
 
-    "github.com/nickcecere/agent/pkg/ai"
-    "github.com/nickcecere/agent/pkg/tools"
+    "github.com/bitop-dev/agent/pkg/ai"
+    "github.com/bitop-dev/agent/pkg/tools"
 )
 
 // WeatherTool fetches current weather for a city.

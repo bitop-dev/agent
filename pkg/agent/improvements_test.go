@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/agent"
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/tools"
+	"github.com/bitop-dev/agent/pkg/agent"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/tools"
 )
 
 // ── Panic recovery (#2) ──────────────────────────────────────────────────

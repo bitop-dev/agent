@@ -19,11 +19,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/nickcecere/agent/pkg/agent"
-	"github.com/nickcecere/agent/pkg/ai"
-	"github.com/nickcecere/agent/pkg/ai/providers/anthropic"
-	"github.com/nickcecere/agent/pkg/tools"
-	"github.com/nickcecere/agent/pkg/tools/builtin"
+	"github.com/bitop-dev/agent/pkg/agent"
+	"github.com/bitop-dev/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai/providers/anthropic"
+	"github.com/bitop-dev/agent/pkg/tools"
+	"github.com/bitop-dev/agent/pkg/tools/builtin"
 )
 
 func main() {

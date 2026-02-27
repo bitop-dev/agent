@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nickcecere/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai"
 )
 
 // ---------------------------------------------------------------------------

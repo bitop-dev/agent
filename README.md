@@ -36,7 +36,7 @@ Inspired by [pi-mono](https://github.com/badlogic/pi-mono)'s TypeScript agent.
 
 ```bash
 # Build
-git clone https://github.com/nickcecere/agent && cd agent
+git clone https://github.com/bitop-dev/agent && cd agent
 go build -o agent ./cmd/agent
 
 # Configure
@@ -214,11 +214,11 @@ exit / quit         Exit
 
 ```go
 import (
-    "github.com/nickcecere/agent/pkg/agent"
-    "github.com/nickcecere/agent/pkg/ai"
-    "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
-    "github.com/nickcecere/agent/pkg/tools"
-    "github.com/nickcecere/agent/pkg/tools/builtin"
+    "github.com/bitop-dev/agent/pkg/agent"
+    "github.com/bitop-dev/agent/pkg/ai"
+    "github.com/bitop-dev/agent/pkg/ai/providers/anthropic"
+    "github.com/bitop-dev/agent/pkg/tools"
+    "github.com/bitop-dev/agent/pkg/tools/builtin"
 )
 
 provider := anthropic.New(os.Getenv("ANTHROPIC_API_KEY"))

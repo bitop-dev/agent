@@ -26,9 +26,9 @@ import (
 	"os"
 	"time"
 
-	anthropicProvider "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
-	openaiProvider "github.com/nickcecere/agent/pkg/ai/providers/openai"
-	"github.com/nickcecere/agent/pkg/ai/providers/proxy"
+	anthropicProvider "github.com/bitop-dev/agent/pkg/ai/providers/anthropic"
+	openaiProvider "github.com/bitop-dev/agent/pkg/ai/providers/openai"
+	"github.com/bitop-dev/agent/pkg/ai/providers/proxy"
 )
 
 func main() {

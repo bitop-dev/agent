@@ -170,7 +170,7 @@ session is created automatically and written to disk.
 
 ```go
 import (
-    "github.com/nickcecere/agent/pkg/session"
+    "github.com/bitop-dev/agent/pkg/session"
 )
 
 // Load a session
@@ -195,7 +195,7 @@ import (
     "bufio"
     "encoding/json"
     "os"
-    "github.com/nickcecere/agent/pkg/session"
+    "github.com/bitop-dev/agent/pkg/session"
 )
 
 f, _ := os.Open("/home/user/.config/agent/sessions/20260226-143012-a3f7c901.jsonl")
@@ -260,7 +260,7 @@ dependencies, dark mode):
 Or from Go:
 
 ```go
-import "github.com/nickcecere/agent/pkg/session"
+import "github.com/bitop-dev/agent/pkg/session"
 
 data, _ := os.ReadFile(sess.FilePath())
 html, err := session.ExportHTML(data, session.ExportOptions{

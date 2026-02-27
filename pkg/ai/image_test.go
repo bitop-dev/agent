@@ -3,7 +3,7 @@ package ai_test
 import (
 	"testing"
 
-	"github.com/nickcecere/agent/pkg/ai"
+	"github.com/bitop-dev/agent/pkg/ai"
 )
 
 // TestImageContent_InUserMessage verifies that ImageContent can be embedded
