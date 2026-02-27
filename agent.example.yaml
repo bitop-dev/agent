@@ -1,0 +1,33 @@
+# Agent configuration
+# Environment variables are expanded everywhere: ${VAR_NAME}
+
+provider: anthropic        # openai | anthropic | openrouter | groq | ollama | lmstudio | <any openai-compatible>
+model: claude-opus-4-5
+# base_url: https://openrouter.ai/api/v1   # required for openrouter, groq, ollama, etc.
+
+api_key: ${ANTHROPIC_API_KEY}
+
+system_prompt: |
+  You are a helpful, concise assistant.
+  When you use a tool, report the result clearly.
+
+max_tokens: 4096
+# temperature: 0.7
+
+tools:
+  # Built-in tool preset:
+  #   coding   — read, bash, edit, write  (default)
+  #   readonly — read, grep, find, ls
+  #   all      — all seven tools
+  #   none     — no built-ins (plugin tools only)
+  preset: coding
+
+  # Working directory for file tools (default: process cwd)
+  # work_dir: /path/to/project
+
+  # External plugin tools — each is a subprocess speaking the JSON protocol.
+  # See examples/tools/bash_tool/main.go for a complete example.
+  plugins: []
+  # plugins:
+  #   - path: ./my_custom_tool
+  #   - path: ./web_search --engine duckduckgo
