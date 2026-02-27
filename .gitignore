@@ -1,5 +1,12 @@
-# Compiled binary
+# Compiled binaries (root-level, from go build ./...)
 /agent
+/basic
+/confirmation
+/custom-tool
+/sub-agent
+/web-agent
+/proxy-server
+/session-reader
 
 # Local config (may contain API keys)
 agent.yaml
