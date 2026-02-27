@@ -411,6 +411,7 @@ ANTHROPIC_API_KEY=sk-... go run ./examples/confirmation
 |------|-------|
 | [docs/install.md](docs/install.md) | Binary, go install, Docker, build from source |
 | [docs/quickstart.md](docs/quickstart.md) | First config and first run |
+| [docs/usage.md](docs/usage.md) | Local CLI, cron jobs, CI pipelines, Docker, scripting patterns |
 | [docs/config.md](docs/config.md) | Complete configuration reference |
 | [docs/providers.md](docs/providers.md) | All providers with credentials |
 | [docs/tools.md](docs/tools.md) | Built-in tools reference |
