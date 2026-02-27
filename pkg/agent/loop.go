@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nickcecere/agent/pkg/ai"
 	"github.com/nickcecere/agent/pkg/tools"
 )
@@ -63,8 +62,8 @@ func (a *Agent) runLoop(
 
 			// Compact context if needed (before next LLM call).
 			if err := a.maybeCompact(ctx); err != nil {
-				// Non-fatal: log and continue without compaction.
-				fmt.Printf("compaction warning: %v\n", err)
+				// Non-fatal: continue without compaction.
+				_ = err
 			}
 
 			// Stream assistant response
@@ -254,10 +253,7 @@ func (a *Agent) executeToolCalls(
 			IsError:    isError,
 		})
 
-		var contentBlocks []ai.ContentBlock
-		for _, c := range result.Content {
-			contentBlocks = append(contentBlocks, c)
-		}
+		contentBlocks := append([]ai.ContentBlock(nil), result.Content...)
 
 		toolResult := ai.ToolResultMessage{
 			Role:       ai.RoleToolResult,
@@ -344,7 +340,4 @@ func defaultConvertToLLM(msgs []ai.Message) []ai.Message {
 	return out
 }
 
-// newCallID generates a unique tool call ID.
-func newCallID() string {
-	return "call_" + uuid.New().String()[:8]
-}
+

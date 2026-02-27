@@ -72,17 +72,6 @@ type respInputItem struct {
 	Output string `json:"output,omitempty"`
 }
 
-type respInputText struct {
-	Type string `json:"type"` // "input_text"
-	Text string `json:"text"`
-}
-
-type respInputImage struct {
-	Type     string `json:"type"`     // "input_image"
-	Detail   string `json:"detail"`   // "auto"
-	ImageURL string `json:"image_url"`
-}
-
 type respTool struct {
 	Type        string          `json:"type"`        // "function"
 	Name        string          `json:"name"`

@@ -61,10 +61,7 @@ func FormatSize(bytes int) string {
 func TruncateHead(content string, maxLines, maxBytes int) TruncationResult {
 	lines := splitLines(content)
 	totalLines := len(lines)
-	totalBytes := len(content) // byte count (ASCII-safe; full UTF-8 via len([]byte(s)))
-
-	// Recompute with actual UTF-8 byte count
-	totalBytes = len([]byte(content))
+	totalBytes := len([]byte(content))
 
 	// No truncation needed?
 	if totalLines <= maxLines && totalBytes <= maxBytes {

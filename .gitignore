@@ -1,0 +1,33 @@
+# Compiled binary
+/agent
+
+# Local config (may contain API keys)
+agent.yaml
+
+# Test output
+/TEST/
+
+# Go build cache
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test binary
+*.test
+
+# Go coverage
+*.out
+coverage.html
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

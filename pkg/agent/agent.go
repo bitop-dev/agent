@@ -316,8 +316,8 @@ func (a *Agent) appendMsg(m ai.Message) {
 		var err error
 		entryID, err = a.sess.AppendMessage(m)
 		if err != nil {
-			// Non-fatal: log to stderr but don't fail the agent.
-			fmt.Printf("session: write error: %v\n", err)
+			// Non-fatal: silently continue (session persistence is best-effort).
+			_ = err
 		}
 	}
 	a.entryIDs = append(a.entryIDs, entryID)
@@ -363,7 +363,7 @@ func (a *Agent) maybeCompact(ctx context.Context) error {
 	// Record compaction in session.
 	if a.sess != nil {
 		if err := a.sess.AppendCompaction(result.summary, firstKeptEntryID, result.tokensBefore); err != nil {
-			fmt.Printf("session: compaction write error: %v\n", err)
+			_ = err // Non-fatal: session persistence is best-effort.
 		}
 	}
 

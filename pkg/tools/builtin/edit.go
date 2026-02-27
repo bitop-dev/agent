@@ -67,7 +67,7 @@ func (t *EditTool) Execute(_ context.Context, _ string, params map[string]any, _
 	match := fuzzyFindText(content, normOld)
 	if !match.found {
 		return tools.ErrorResult(fmt.Errorf(
-			"could not find the exact text in %s. The oldText must match exactly including all whitespace and newlines.",
+			"could not find the exact text in %s; the oldText must match exactly including all whitespace and newlines",
 			pathParam,
 		)), nil
 	}
@@ -78,7 +78,7 @@ func (t *EditTool) Execute(_ context.Context, _ string, params map[string]any, _
 	occurrences := strings.Count(fuzzyContent, fuzzyOld)
 	if occurrences > 1 {
 		return tools.ErrorResult(fmt.Errorf(
-			"found %d occurrences of the text in %s. The text must be unique. Please provide more context to make it unique.",
+			"found %d occurrences of the text in %s; provide more context to make it unique",
 			occurrences, pathParam,
 		)), nil
 	}
@@ -89,7 +89,7 @@ func (t *EditTool) Execute(_ context.Context, _ string, params map[string]any, _
 
 	if base == newContent {
 		return tools.ErrorResult(fmt.Errorf(
-			"no changes made to %s. The replacement produced identical content.",
+			"no changes made to %s; the replacement produced identical content",
 			pathParam,
 		)), nil
 	}
