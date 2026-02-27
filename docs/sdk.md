@@ -1,7 +1,7 @@
 # Using the Agent as a Go Library
 
-The agent is designed to be embedded in other Go programs. You don't have to
-use the CLI at all — just import the packages directly.
+The agent is designed to be embedded in other Go programs. Import the packages
+directly — no CLI required.
 
 ---
 
@@ -31,17 +31,18 @@ import (
 )
 
 func main() {
-    // 1. Create a provider
     provider := anthropic.New(os.Getenv("ANTHROPIC_API_KEY"))
 
-    // 2. Create a tool registry
     reg := tools.NewRegistry()
     builtin.Register(reg, builtin.PresetCoding, ".")
 
-    // 3. Create the agent
-    a := agent.New(provider, "claude-sonnet-4-5", reg, "You are a helpful assistant.")
+    a := agent.New(agent.Options{
+        Provider:     provider,
+        Model:        "claude-sonnet-4-5",
+        Tools:        reg,
+        SystemPrompt: "You are a helpful assistant.",
+    })
 
-    // 4. Subscribe to events
     a.Subscribe(func(e agent.Event) {
         switch e.Type {
         case agent.EventMessageUpdate:
@@ -51,18 +52,14 @@ func main() {
         case agent.EventToolStart:
             fmt.Printf("\n[tool] %s\n", e.ToolName)
         case agent.EventTurnEnd:
-            fmt.Printf("\n[tokens] ~%d in context\n", e.ContextUsage.Tokens)
+            fmt.Printf("\n[tokens: %d | cost: $%.4f]\n",
+                e.ContextUsage.Tokens, e.CostUsage.TotalCost)
         }
     })
 
-    // 5. Run
-    ctx := context.Background()
-    userMsg := ai.UserMessage{
-        Role:    ai.RoleUser,
-        Content: []ai.ContentBlock{ai.TextContent{Type: "text", Text: "List the .go files in the current directory."}},
-    }
-    if err := a.Run(ctx, []ai.Message{userMsg}, agent.Config{
+    if err := agent.Prompt(context.Background(), "List .go files here.", agent.Config{
         StreamOptions: ai.StreamOptions{MaxTokens: 1024},
+        MaxTurns:      10,
     }); err != nil {
         fmt.Fprintln(os.Stderr, err)
         os.Exit(1)
@@ -77,27 +74,72 @@ func main() {
 ### `agent.New`
 
 ```go
-func New(
-    provider ai.Provider,
-    model string,
-    registry *tools.Registry,
-    systemPrompt string,
-) *Agent
+func New(opts Options) *Agent
 ```
 
-Creates a new Agent. All parameters are required.
-
-### `agent.Agent.Run`
+Creates a new Agent. `Options` fields:
 
 ```go
-func (a *Agent) Run(ctx context.Context, msgs []ai.Message, cfg Config) error
+type Options struct {
+    Provider      ai.Provider       // required
+    Model         string            // required
+    Tools         *tools.Registry   // nil → empty registry
+    SystemPrompt  string
+    Session       *session.Session  // optional: persist to JSONL file
+    Compaction    CompactionConfig  // optional: auto-compact context
+    StreamOptions ai.StreamOptions  // passed to every LLM call
+    Logger        *slog.Logger      // nil → silent; slog.Default() for stderr
+}
+```
+
+### `agent.Agent.Prompt`
+
+```go
+func (a *Agent) Prompt(ctx context.Context, text string, cfg Config) error
+```
+
+Sends a user message and runs the agent loop to completion. Appends the user
+message to history, then calls `PromptMessages`.
+
+### `agent.Agent.PromptMessages`
+
+```go
+func (a *Agent) PromptMessages(ctx context.Context, msgs []ai.Message, cfg Config) error
 ```
 
 Runs the agent loop with the given initial messages. Blocks until the agent
-stops (no more tool calls, no follow-up messages, or context cancelled).
+stops (no more tool calls, context cancelled, or turn limit reached). Returns
+non-nil only for unrecoverable failures.
 
-Returns a non-nil error only for unrecoverable failures. Provider errors and
-tool errors are surfaced as events, not returned.
+### `agent.Agent.Continue`
+
+```go
+func (a *Agent) Continue(ctx context.Context, cfg Config) error
+```
+
+Re-runs the agent loop without adding a new user message. Useful after
+calling `Steer()` or `FollowUp()`.
+
+### `agent.Agent.Steer`
+
+```go
+func (a *Agent) Steer(m ai.Message)
+func (a *Agent) SteerText(text string)
+```
+
+Injects a message into the running loop between tool calls (for steering a
+live session). Calls to `SteerText` are equivalent to `Steer` with a plain
+text `UserMessage`.
+
+### `agent.Agent.FollowUp`
+
+```go
+func (a *Agent) FollowUp(m ai.Message)
+func (a *Agent) FollowUpText(text string)
+```
+
+Queues a message to be added after the agent would otherwise stop. Causes the
+loop to continue with the queued message.
 
 ### `agent.Agent.Subscribe`
 
@@ -116,14 +158,33 @@ func (a *Agent) State() State
 
 Returns a snapshot of the current agent state. Thread-safe.
 
-### `agent.Agent.AttachSession`
-
 ```go
-func (a *Agent) AttachSession(sess *session.Session)
+type State struct {
+    SystemPrompt    string
+    Model           string
+    Provider        string
+    Messages        []ai.Message
+    IsStreaming     bool
+    PendingToolCalls map[string]bool
+    Error           string
+    ContextTokens   int
+    CumulativeCost  CostUsage
+}
 ```
 
-Attaches a session for persistence. Every message is appended to the session
-file automatically.
+### Other Methods
+
+| Method | Description |
+|--------|-------------|
+| `SetModel(m string)` | Switch model (takes effect on next turn) |
+| `SetProvider(p ai.Provider)` | Switch provider |
+| `SetSystemPrompt(s string)` | Update system prompt |
+| `AttachSession(s, msgs)` | Attach a session and load its messages |
+| `Tools() *tools.Registry` | Access the tool registry |
+| `Messages() []ai.Message` | All messages in the current conversation |
+| `ClearMessages()` | Reset conversation history |
+| `Abort()` | Cancel any running loop |
+| `IsStreaming() bool` | Whether the loop is currently running |
 
 ---
 
@@ -131,32 +192,86 @@ file automatically.
 
 ```go
 type Config struct {
-    // ConvertToLLM transforms the full message history to what gets sent to
-    // the LLM. Default: keep only user/assistant/tool_result messages.
+    // ConvertToLLM transforms history before sending to the LLM.
+    // Default: keeps only user/assistant/tool_result messages.
     ConvertToLLM func([]ai.Message) ([]ai.Message, error)
 
-    // TransformContext applies any pruning/enrichment before ConvertToLLM.
+    // TransformContext prunes/enriches messages before ConvertToLLM.
     TransformContext func([]ai.Message) ([]ai.Message, error)
 
-    // GetAPIKey returns a (possibly dynamic) API key for the provider.
+    // GetAPIKey returns a (possibly dynamic/expiring) API key.
     GetAPIKey func(provider string) (string, error)
 
-    // GetSteeringMessages returns messages to inject between tool calls.
+    // GetSteeringMessages injects messages between tool calls.
     // Return nil to continue normally.
     GetSteeringMessages func() ([]ai.Message, error)
 
-    // GetFollowUpMessages returns messages to send after the agent would stop.
+    // GetFollowUpMessages adds messages after the loop would stop.
     // Return nil to stop.
     GetFollowUpMessages func() ([]ai.Message, error)
+
+    // ConfirmToolCall gates tool execution before each call.
+    //   nil (default) — auto-approve all tools
+    //   AutoApproveAll — explicit auto-approve
+    //   custom func — interactive or policy-based approval
+    ConfirmToolCall func(name string, args map[string]any) (ConfirmResult, error)
 
     // StreamOptions are passed to the provider.
     StreamOptions ai.StreamOptions
 
-    // MaxTurns caps the number of LLM calls (turns) per Run.
-    // Each turn = one assistant response + its tool calls.
-    // 0 means unlimited. When the limit is hit the loop stops cleanly and
-    // EventTurnLimitReached is broadcast.
+    // MaxTurns caps turns per Prompt call (0 = unlimited).
     MaxTurns int
+
+    // MaxRetries for transient LLM errors (rate limits, 5xx, network).
+    // 0 = no retries (default).
+    MaxRetries int
+
+    // RetryBaseDelay is the initial backoff. Doubles each attempt, caps at 60s.
+    // Zero defaults to 1s.
+    RetryBaseDelay time.Duration
+
+    // MaxToolConcurrency runs multiple tool calls in parallel.
+    // 0 or 1 = sequential (default). > 1 = parallel with semaphore.
+    MaxToolConcurrency int
+
+    // ToolTimeout limits each tool execution. 0 = no timeout.
+    ToolTimeout time.Duration
+
+    // MaxCostUSD stops the loop when cumulative cost exceeds this. 0 = no cap.
+    MaxCostUSD float64
+
+    // OnMetrics is called after each turn with performance data.
+    OnMetrics func(TurnMetrics)
+}
+```
+
+### Confirmation Hooks
+
+```go
+// Allow a tool call
+cfg.ConfirmToolCall = agent.AutoApproveAll
+
+// Prompt the user
+cfg.ConfirmToolCall = func(name string, args map[string]any) (agent.ConfirmResult, error) {
+    fmt.Printf("Allow %s %v? [y/n/q]: ", name, args)
+    var reply string
+    fmt.Scanln(&reply)
+    switch reply {
+    case "y":
+        return agent.ConfirmAllow, nil
+    case "q":
+        return agent.ConfirmAbort, nil
+    default:
+        return agent.ConfirmDeny, nil
+    }
+}
+
+// Policy-based: deny all bash calls
+cfg.ConfirmToolCall = func(name string, args map[string]any) (agent.ConfirmResult, error) {
+    if name == "bash" {
+        return agent.ConfirmDeny, nil
+    }
+    return agent.ConfirmAllow, nil
 }
 ```
 
@@ -164,19 +279,19 @@ type Config struct {
 
 ## Events
 
-All agent activity is surfaced via events. Subscribe with `a.Subscribe(fn)`.
-
 ```go
 type Event struct {
     Type EventType
 
     // message_* events
     Message     ai.Message
-    StreamEvent *ai.StreamEvent   // set on message_update
+    StreamEvent *ai.StreamEvent  // set on message_update
 
     // turn_end
     ToolResults  []ai.ToolResultMessage
-    ContextUsage ContextUsage     // token snapshot
+    ContextUsage ContextUsage
+    CostUsage    CostUsage        // cumulative cost to date
+    TurnDuration time.Duration    // wall-clock time for this turn
 
     // compaction
     Compaction *CompactionEvent
@@ -190,29 +305,67 @@ type Event struct {
 
     // agent_end
     NewMessages []ai.Message
+
+    // retry events
+    RetryAttempt int
+    RetryError   error
+    RetryDelay   time.Duration
+
+    // metrics callback
+    Metrics *TurnMetrics
 }
 ```
 
 | Event Type | Description |
 |-----------|-------------|
-| `agent_start` | Agent loop started |
-| `agent_end` | Agent loop finished; `NewMessages` has this turn's messages |
-| `turn_start` | One LLM call starting |
-| `turn_end` | One LLM call + all its tools finished; `ContextUsage` populated |
-| `message_start` | Message added (user, assistant, or tool_result) |
-| `message_update` | Streaming delta; `StreamEvent` has the delta |
+| `agent_start` | Loop started |
+| `agent_end` | Loop finished; `NewMessages` has this run's messages |
+| `turn_end` | One LLM call + all tool calls finished; `ContextUsage`, `CostUsage` populated |
+| `message_start` | Message added |
+| `message_update` | Streaming delta; `StreamEvent.Delta` has the text |
 | `message_end` | Message finalised |
 | `tool_start` | Tool execution starting |
 | `tool_update` | Streaming progress from tool |
-| `tool_end` | Tool execution finished |
+| `tool_end` | Tool finished; `ToolResult`, `IsError` set |
+| `tool_denied` | Tool blocked by `ConfirmToolCall` returning `ConfirmDeny` |
 | `compaction` | Context compaction completed |
-| `turn_limit_reached` | `MaxTurns` hit — loop stopped early; no error returned |
+| `turn_limit_reached` | `MaxTurns` hit; loop stopped |
+| `retry` | Retrying after transient error; `RetryAttempt`, `RetryError`, `RetryDelay` set |
+| `config_reloaded` | `ConfigReloader` applied a new config file |
+
+---
+
+## TurnMetrics
+
+```go
+type TurnMetrics struct {
+    TurnNumber       int
+    ProviderLatency  time.Duration
+    ToolDurations    map[string]time.Duration  // tool name → execution time
+    InputTokens      int
+    OutputTokens     int
+    CacheReadTokens  int
+    CacheWriteTokens int
+    TotalCost        float64
+    Error            string
+}
+```
+
+```go
+cfg.OnMetrics = func(m agent.TurnMetrics) {
+    slog.Info("turn",
+        "n", m.TurnNumber,
+        "latency_ms", m.ProviderLatency.Milliseconds(),
+        "in", m.InputTokens,
+        "out", m.OutputTokens,
+        "cost_usd", m.TotalCost,
+    )
+}
+```
 
 ---
 
 ## Providers
-
-All providers implement `ai.Provider`:
 
 ```go
 type Provider interface {
@@ -231,29 +384,14 @@ type Provider interface {
 | `pkg/ai/providers/bedrock` | `bedrock.New(region, profile)` |
 | `pkg/ai/providers/proxy` | `proxy.New(serverURL, token)` |
 
-### Provider with custom base URL
-
 ```go
-import "github.com/nickcecere/agent/pkg/ai/providers/openai"
-
 // OpenAI-compatible endpoint (OpenRouter, Ollama, etc.)
 provider := openai.NewWithBaseURL(apiKey, "https://openrouter.ai/api/v1")
-```
-
-### Proxy provider
-
-```go
-import "github.com/nickcecere/agent/pkg/ai/providers/proxy"
-
-// Connect to a remote agent server
-client := proxy.New("https://myserver.example.com", "secret-token")
 ```
 
 ---
 
 ## Custom Provider
-
-Implement `ai.Provider` to integrate any LLM backend:
 
 ```go
 type MyProvider struct{}
@@ -274,8 +412,6 @@ func (p *MyProvider) Stream(
     go func() {
         defer close(ch)
         defer close(done)
-
-        // Call your API, stream results into ch
         finalMsg, finalErr = callMyAPI(ctx, model, llmCtx, opts, ch)
     }()
 
@@ -313,34 +449,119 @@ func (t *MyTool) Execute(
     onUpdate tools.UpdateFn,
 ) (tools.Result, error) {
     input, _ := params["input"].(string)
+    // Emit progress (optional)
+    if onUpdate != nil {
+        onUpdate(tools.TextResult("Processing..."))
+    }
     return tools.TextResult("Result: " + input), nil
 }
 
-// Register
 reg := tools.NewRegistry()
 reg.Register(&MyTool{})
 ```
 
 ---
 
-## Pluggable Bash Executor
+## Sub-Agent Delegation
 
-Replace the bash tool's execution backend (for remote/sandboxed environments):
+Sub-agents let you compose agents — a parent agent calls a child agent as a
+tool and uses its final response.
 
 ```go
-import "github.com/nickcecere/agent/pkg/tools/builtin"
+// Standalone sub-agent
+sub := agent.NewSubAgent(agent.SubAgentOptions{
+    Provider:     provider,
+    Model:        "gpt-4o",
+    SystemPrompt: "You are a code reviewer. Be concise.",
+    Tools:        readonlyReg,
+    MaxTurns:     10,
+    OnEvent: func(e agent.Event) {
+        // forward events to a logger, parent subscriber, etc.
+    },
+})
+result, err := sub.Run(ctx, "Review this diff...")
 
-type SSHExecutor struct { host string }
+// As a tool the parent agent can call
+reviewTool := agent.NewSubAgentTool(
+    "code_review",
+    "Reviews a code snippet and returns structured feedback",
+    agent.SubAgentOptions{
+        Provider:     provider,
+        Model:        "gpt-4o",
+        SystemPrompt: "You are a strict code reviewer.",
+        MaxTurns:     5,
+    },
+)
+reg.Register(reviewTool)
+```
+
+`SubAgentTool` forwards streaming deltas from the child agent back to the
+parent as `tool_update` events.
+
+---
+
+## Config Hot-Reload
+
+Watch a YAML config file and apply mutable changes to a running agent without
+a restart. Mutable fields: `model`, `max_tokens`, `temperature`,
+`thinking_level`, `cache_retention`, `context_window`.
+
+```go
+reloader := agent.NewConfigReloader("agent.yaml", myAgent, slog.Default())
+reloader.OnReload = func(cfg *agent.FileConfig) {
+    fmt.Printf("Reloaded: model=%s max_tokens=%d\n", cfg.Model, cfg.MaxTokens)
+}
+reloader.Start()        // polls every 2 seconds
+defer reloader.Stop()
+
+// Or trigger manually (e.g. from a /reload REPL command):
+if err := reloader.ReloadOnce(); err != nil {
+    fmt.Println("reload failed:", err)
+}
+```
+
+Emits `EventConfigReloaded` after each successful reload.
+
+---
+
+## Pluggable Bash Executor
+
+```go
+type SSHExecutor struct{ host string }
 
 func (e *SSHExecutor) Exec(ctx context.Context, command, cwd string, onData func(string)) (int, error) {
-    // run command on remote host via SSH
     return runSSH(ctx, e.host, command, cwd, onData)
 }
 
-// Register bash tool with custom executor
-reg := tools.NewRegistry()
 reg.Register(builtin.NewBashToolWithExecutor(".", &SSHExecutor{host: "myserver"}))
 ```
+
+---
+
+## Multimodal / Image Input
+
+Include `ai.ImageContent` blocks in user messages or tool results:
+
+```go
+msg := ai.UserMessage{
+    Role: ai.RoleUser,
+    Content: []ai.ContentBlock{
+        ai.TextContent{Type: "text", Text: "What's in this image?"},
+        ai.ImageContent{Type: "image", MIMEType: "image/png", Data: base64Data},
+    },
+    Timestamp: time.Now().UnixMilli(),
+}
+
+err := a.PromptMessages(ctx, []ai.Message{msg}, cfg)
+```
+
+All providers serialize `ImageContent` automatically:
+
+| Provider | Wire format |
+|----------|-------------|
+| Anthropic | `"type":"image"` with base64 source |
+| OpenAI | `"type":"image_url"` with `data:` URI |
+| Google | `inlineData` with base64 |
 
 ---
 
@@ -349,26 +570,49 @@ reg.Register(builtin.NewBashToolWithExecutor(".", &SSHExecutor{host: "myserver"}
 ```go
 import "github.com/nickcecere/agent/pkg/session"
 
-// Create a new session
 dir := filepath.Join(os.UserHomeDir(), ".config", "agent", "sessions")
 sess, err := session.Create(dir, cwd)
 
-// Attach to agent — all messages auto-persisted
-agent.AttachSession(sess)
+// Restore existing conversation
+msgs, err := sess.Messages()
+a.AttachSession(sess, msgs)
 
-// On exit
+// All subsequent messages auto-persisted.
+// On exit:
 sess.Close()
 
 // Resume later
-sess2, err := session.Load(dir, "a3f7c9") // prefix match on session ID
-msgs := sess2.Messages()                   // restore conversation history
+sess2, err := session.Load(dir, "a3f7c9") // prefix match
+msgs2, _ := sess2.Messages()
 ```
 
 ---
 
-## Serving a Proxy
+## Compaction
 
-Expose any provider as a network-accessible agent proxy:
+```go
+a := agent.New(agent.Options{
+    // ...
+    Compaction: agent.CompactionConfig{
+        Enabled:          true,
+        ContextWindow:    200000,
+        ReserveTokens:    16384,
+        KeepRecentTokens: 20000,
+    },
+})
+
+a.Subscribe(func(e agent.Event) {
+    if e.Type == agent.EventCompaction {
+        c := e.Compaction
+        fmt.Printf("Compacted %d → %d tokens (%d messages removed)\n",
+            c.TokensBefore, c.TokensAfter, c.MessagesRemoved)
+    }
+})
+```
+
+---
+
+## Proxy Server
 
 ```go
 import (
@@ -384,34 +628,112 @@ http.Handle("/stream", handler)
 http.ListenAndServe(":8080", nil)
 ```
 
-Clients connect using `provider: proxy` with `base_url: http://localhost:8080`.
+Clients connect via `provider: proxy` with `base_url: http://localhost:8080`.
 
 ---
 
-## Compaction
-
-Compaction is configured when building the agent:
+## Structured Logging
 
 ```go
-import "github.com/nickcecere/agent/pkg/agent"
+import "log/slog"
 
-a := agent.New(provider, model, reg, systemPrompt)
-a.SetCompaction(agent.CompactionConfig{
-    Enabled:          true,
-    ContextWindow:    200000,
-    ReserveTokens:    16384,
-    KeepRecentTokens: 20000,
+// Log to stderr
+a := agent.New(agent.Options{
+    Logger: slog.Default(),
+    // ...
+})
+
+// Log to a file with JSON format
+logFile, _ := os.OpenFile("agent.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+logger := slog.New(slog.NewJSONHandler(logFile, nil))
+a := agent.New(agent.Options{
+    Logger: logger,
+    // ...
 })
 ```
 
-Listen for compaction events:
+Internal warnings (retry attempts, session write failures, tool panics) all
+use the logger. Silent by default.
+
+---
+
+## Complete Example: Production-Grade Agent
 
 ```go
-a.Subscribe(func(e agent.Event) {
-    if e.Type == agent.EventCompaction {
-        c := e.Compaction
-        fmt.Printf("Compacted %d → %d tokens (%d messages removed)\n",
-            c.TokensBefore, c.TokensAfter, c.MessagesRemoved)
+package main
+
+import (
+    "context"
+    "fmt"
+    "log/slog"
+    "os"
+    "time"
+
+    "github.com/nickcecere/agent/pkg/agent"
+    "github.com/nickcecere/agent/pkg/ai"
+    "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
+    "github.com/nickcecere/agent/pkg/tools"
+    "github.com/nickcecere/agent/pkg/tools/builtin"
+)
+
+func main() {
+    provider := anthropic.New(os.Getenv("ANTHROPIC_API_KEY"))
+
+    reg := tools.NewRegistry()
+    builtin.Register(reg, builtin.PresetCoding, ".")
+
+    a := agent.New(agent.Options{
+        Provider:     provider,
+        Model:        "claude-sonnet-4-5",
+        Tools:        reg,
+        SystemPrompt: "You are a coding assistant.",
+        Logger:       slog.Default(),
+        Compaction: agent.CompactionConfig{
+            Enabled:          true,
+            ContextWindow:    200000,
+            ReserveTokens:    16384,
+            KeepRecentTokens: 20000,
+        },
+    })
+
+    a.Subscribe(func(e agent.Event) {
+        switch e.Type {
+        case agent.EventMessageUpdate:
+            if se := e.StreamEvent; se != nil && se.Type == ai.StreamEventTextDelta {
+                fmt.Print(se.Delta)
+            }
+        case agent.EventToolStart:
+            fmt.Printf("\n[%s] running...\n", e.ToolName)
+        case agent.EventToolDenied:
+            fmt.Printf("\n[%s] denied\n", e.ToolName)
+        case agent.EventRetry:
+            fmt.Printf("\n[retry %d] %v (waiting %s)\n",
+                e.RetryAttempt, e.RetryError, e.RetryDelay.Round(time.Millisecond))
+        case agent.EventTurnEnd:
+            fmt.Printf("\n[cost: $%.4f total | %d tokens]\n",
+                e.CostUsage.TotalCost, e.ContextUsage.Tokens)
+        }
+    })
+
+    cfg := agent.Config{
+        StreamOptions:      ai.StreamOptions{MaxTokens: 4096},
+        MaxTurns:           50,
+        MaxRetries:         3,
+        RetryBaseDelay:     2 * time.Second,
+        MaxToolConcurrency: 4,
+        MaxCostUSD:         1.00, // stop if > $1 spent
+        ConfirmToolCall:    agent.AutoApproveAll,
+        OnMetrics: func(m agent.TurnMetrics) {
+            slog.Info("turn", "n", m.TurnNumber,
+                "latency_ms", m.ProviderLatency.Milliseconds(),
+                "cost", m.TotalCost)
+        },
     }
-})
+
+    if err := a.Prompt(context.Background(), os.Args[1], cfg); err != nil {
+        fmt.Fprintln(os.Stderr, err)
+        os.Exit(1)
+    }
+    fmt.Println()
+}
 ```

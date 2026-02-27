@@ -1,0 +1,40 @@
+# Compiled binaries (root-level, from go build ./...)
+/agent
+/basic
+/confirmation
+/custom-tool
+/sub-agent
+/web-agent
+/proxy-server
+/session-reader
+
+# Local config (may contain API keys)
+agent.yaml
+
+# Test output
+/TEST/
+
+# Go build cache
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test binary
+*.test
+
+# Go coverage
+*.out
+coverage.html
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

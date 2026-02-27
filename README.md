@@ -13,8 +13,17 @@ Inspired by [pi-mono](https://github.com/badlogic/pi-mono)'s TypeScript agent.
 - **6 LLM providers** — Anthropic, OpenAI (Responses + Completions), Google Gemini, Azure OpenAI, Amazon Bedrock, and any OpenAI-compatible endpoint
 - **9 built-in tools** — `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_search`, `web_fetch`
 - **Plugin tools** — external executables over JSON/stdin/stdout, any language
+- **Sub-agent delegation** — compose agents; a parent calls a child agent as a tool
 - **Session persistence** — JSONL files, resume any session, fork into branches
 - **Context compaction** — auto-summarise old context to stay within the model's window
+- **Retry with backoff** — automatic retry on rate limits and transient errors
+- **Parallel tool execution** — run multiple tool calls concurrently
+- **Confirmation hooks** — gate tool execution with allow/deny/abort callbacks
+- **Cost tracking** — per-turn and cumulative USD cost with budget cap
+- **Observability** — `OnMetrics` callback with per-turn latency, tokens, and tool durations
+- **Structured logging** — `*slog.Logger` with zero-dep default
+- **Config hot-reload** — apply model/token changes to a running agent without restart
+- **Multimodal input** — image blocks in user messages and tool results
 - **Skills** — Markdown files with specialised instructions, discovered automatically
 - **Prompt templates** — `/template arg1 arg2` expansion in the REPL
 - **Model registry** — 30+ models with context windows, costs, and capability flags
@@ -206,6 +215,7 @@ exit / quit         Exit
 ```go
 import (
     "github.com/nickcecere/agent/pkg/agent"
+    "github.com/nickcecere/agent/pkg/ai"
     "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
     "github.com/nickcecere/agent/pkg/tools"
     "github.com/nickcecere/agent/pkg/tools/builtin"
@@ -216,19 +226,35 @@ provider := anthropic.New(os.Getenv("ANTHROPIC_API_KEY"))
 reg := tools.NewRegistry()
 builtin.Register(reg, builtin.PresetCoding, ".")
 
-a := agent.New(provider, "claude-sonnet-4-5", reg, "You are helpful.")
+a := agent.New(agent.Options{
+    Provider:     provider,
+    Model:        "claude-sonnet-4-5",
+    Tools:        reg,
+    SystemPrompt: "You are helpful.",
+    Logger:       slog.Default(), // structured logging to stderr
+})
 
 a.Subscribe(func(e agent.Event) {
-    if e.Type == agent.EventMessageUpdate {
-        if se := e.StreamEvent; se != nil {
+    switch e.Type {
+    case agent.EventMessageUpdate:
+        if se := e.StreamEvent; se != nil && se.Type == ai.StreamEventTextDelta {
             fmt.Print(se.Delta)
         }
+    case agent.EventRetry:
+        fmt.Printf("[retry %d] %v\n", e.RetryAttempt, e.RetryError)
+    case agent.EventTurnEnd:
+        fmt.Printf("[cost: $%.4f | %d tokens]\n",
+            e.CostUsage.TotalCost, e.ContextUsage.Tokens)
     }
 })
 
-a.Run(ctx, []ai.Message{userMsg}, agent.Config{
-    StreamOptions: ai.StreamOptions{MaxTokens: 2048},
-    MaxTurns:      50, // stop after 50 turns; 0 = unlimited
+a.Prompt(ctx, "List .go files here.", agent.Config{
+    StreamOptions:      ai.StreamOptions{MaxTokens: 2048},
+    MaxTurns:           50,
+    MaxRetries:         3,
+    MaxToolConcurrency: 4,
+    MaxCostUSD:         0.50,
+    ConfirmToolCall:    agent.AutoApproveAll,
 })
 ```
 
@@ -316,6 +342,8 @@ See [docs/compaction.md](docs/compaction.md).
 | `examples/basic/` | Minimal embedded agent with REPL |
 | `examples/custom-tool/` | Calculator + dice roller custom tools |
 | `examples/web-agent/` | Research agent with `web_search` + `web_fetch` |
+| `examples/sub-agent/` | Sub-agent delegation via `SubAgent` + `SubAgentTool` |
+| `examples/confirmation/` | Tool confirmation hooks (interactive + policy-based) |
 | `examples/proxy-server/` | HTTP proxy for any upstream provider |
 | `examples/session-reader/` | List, display, export session files |
 | `examples/tools/bash_tool/` | External subprocess plugin (JSON protocol) |
@@ -327,6 +355,8 @@ Run any example:
 ```bash
 ANTHROPIC_API_KEY=sk-... go run ./examples/basic
 OPENAI_API_KEY=sk-...    go run ./examples/web-agent "Latest news in Go"
+ANTHROPIC_API_KEY=sk-... go run ./examples/sub-agent "Summarise this repo"
+ANTHROPIC_API_KEY=sk-... go run ./examples/confirmation
                          go run ./examples/session-reader list
 ```
 
@@ -339,7 +369,8 @@ OPENAI_API_KEY=sk-...    go run ./examples/web-agent "Latest news in Go"
 | [docs/quickstart.md](docs/quickstart.md) | Install, first config, first run |
 | [docs/config.md](docs/config.md) | Complete configuration reference |
 | [docs/providers.md](docs/providers.md) | All providers with credentials |
-| [docs/tools.md](docs/tools.md) | Built-in tools + writing your own |
+| [docs/tools.md](docs/tools.md) | Built-in tools reference |
+| [docs/custom-tools.md](docs/custom-tools.md) | Writing compiled-in and plugin tools (Go, Python, TS, Rust, Bash, Ruby) |
 | [docs/session.md](docs/session.md) | Session format, JSONL, branching |
 | [docs/compaction.md](docs/compaction.md) | Context compaction |
 | [docs/skills.md](docs/skills.md) | Skills system |

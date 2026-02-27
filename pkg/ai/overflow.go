@@ -1,9 +1,18 @@
 // Package ai — context overflow detection.
 //
 // IsContextOverflow checks whether an assistant message represents a context-window
-// overflow, either via an error message from the provider or (for providers that
-// silently accept over-long requests) by comparing usage.Input against the known
-// context window size.
+// overflow. Three detection strategies are used in order:
+//
+//  1. Error message pattern matching — covers all known provider error formats.
+//  2. HTTP status code matching — for providers that return 400/413 with no body.
+//  3. Silent overflow — usage.Input exceeds the known context window
+//     (for providers like z.ai that accept over-long requests silently).
+//
+// # Limitations
+//
+// Strategy 1 relies on string matching against error messages. If a provider
+// changes its error format, detection may fail until the pattern list is updated.
+// Strategy 3 requires the caller to pass the correct contextWindow value.
 package ai
 
 import "regexp"

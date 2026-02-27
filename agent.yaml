@@ -1,9 +1,0 @@
-provider: openai-completions
-base_url: https://api.ai.it.ufl.edu/v1
-api_key: sk-3NI1--VUSGnbEEgikDkVsQ
-model: gpt-oss-120b
-max_tokens: 4096
-
-tools:
-  preset: all
-  work_dir: /Users/nickcecere/Projects/GOLANG/agent

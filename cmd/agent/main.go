@@ -217,8 +217,18 @@ func main() {
 	defer unsub()
 
 	callCfg := agent.Config{
-		StreamOptions: streamOpts,
-		MaxTurns:      cfg.MaxTurns,
+		StreamOptions:      streamOpts,
+		MaxTurns:           cfg.MaxTurns,
+		MaxRetries:         cfg.MaxRetries,
+		MaxToolConcurrency: cfg.MaxToolConcurrency,
+		RetryBaseDelay:     time.Second,
+	}
+
+	// Auto-approve mode: skip tool confirmation for unattended operation.
+	// When auto_approve is false (default) and running interactively,
+	// a confirmation hook could be wired here. For now, nil = auto-approve.
+	if cfg.AutoApprove {
+		callCfg.ConfirmToolCall = agent.AutoApproveAll
 	}
 
 	// Handle SIGINT / SIGTERM
@@ -553,6 +563,14 @@ func makeEventPrinter() func(agent.Event) {
 			}
 		case agent.EventTurnLimitReached:
 			fmt.Printf("\n[agent] turn limit reached — stopping loop\n")
+		case agent.EventRetry:
+			fmt.Printf("\n[retry] attempt %d (delay %s): %v\n", ev.RetryAttempt, ev.RetryDelay, ev.RetryError)
+		case agent.EventToolDenied:
+			fmt.Printf("\n[denied] %s — tool call blocked\n", ev.ToolName)
+		case agent.EventTurnEnd:
+			if ev.CostUsage.TotalCost > 0 {
+				fmt.Printf("[cost] turn: $%.6f  cumulative: $%.6f\n", ev.CostUsage.TotalCost, ev.CostUsage.TotalCost)
+			}
 		}
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nickcecere/agent/pkg/ai"
 	"github.com/nickcecere/agent/pkg/ai/sse"
 )
@@ -442,7 +441,4 @@ func mapStopReason(s string) ai.StopReason {
 	}
 }
 
-// newToolCallID generates a unique tool call ID when the provider doesn't supply one.
-func newToolCallID() string {
-	return "call_" + uuid.New().String()[:8]
-}
+

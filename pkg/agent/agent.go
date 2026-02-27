@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -20,11 +21,15 @@ type Agent struct {
 	model        string
 	provider     ai.Provider
 	tools        *tools.Registry
+	logger       *slog.Logger
 
 	messages    []ai.Message
 	isStreaming  bool
 	pendingCalls map[string]bool
 	err          string
+
+	// Cumulative cost tracking across all turns.
+	cumulativeCost CostUsage
 
 	listeners   map[int]func(Event)
 	listenerSeq int
@@ -58,6 +63,11 @@ type Options struct {
 	Session       *session.Session // optional: persist conversation to file
 	Compaction    CompactionConfig // optional: auto-compact when context grows
 	StreamOptions ai.StreamOptions // passed to every LLM call
+
+	// Logger is used for internal warnings and debug messages.
+	// Default: no-op logger (silent). Set to slog.Default() for stderr,
+	// or provide a custom *slog.Logger for structured logging.
+	Logger *slog.Logger
 }
 
 // New creates a new Agent.
@@ -66,11 +76,16 @@ func New(opts Options) *Agent {
 	if reg == nil {
 		reg = tools.NewRegistry()
 	}
+	logger := opts.Logger
+	if logger == nil {
+		logger = defaultLogger()
+	}
 	a := &Agent{
 		systemPrompt:  opts.SystemPrompt,
 		model:         opts.Model,
 		provider:      opts.Provider,
 		tools:         reg,
+		logger:        logger,
 		pendingCalls:  make(map[string]bool),
 		listeners:     make(map[int]func(Event)),
 		sess:          opts.Session,
@@ -286,6 +301,7 @@ func (a *Agent) State() State {
 		PendingToolCalls:  pending,
 		Error:            a.err,
 		ContextTokens:    usage.Tokens,
+		CumulativeCost:   a.cumulativeCost,
 	}
 }
 
@@ -316,8 +332,7 @@ func (a *Agent) appendMsg(m ai.Message) {
 		var err error
 		entryID, err = a.sess.AppendMessage(m)
 		if err != nil {
-			// Non-fatal: log to stderr but don't fail the agent.
-			fmt.Printf("session: write error: %v\n", err)
+			a.logger.Warn("session write error", "error", err)
 		}
 	}
 	a.entryIDs = append(a.entryIDs, entryID)
@@ -363,7 +378,7 @@ func (a *Agent) maybeCompact(ctx context.Context) error {
 	// Record compaction in session.
 	if a.sess != nil {
 		if err := a.sess.AppendCompaction(result.summary, firstKeptEntryID, result.tokensBefore); err != nil {
-			fmt.Printf("session: compaction write error: %v\n", err)
+			a.logger.Warn("session compaction write error", "error", err)
 		}
 	}
 

@@ -57,6 +57,17 @@ type FileConfig struct {
 	// Recommended: 50 for general use, 200 for long research tasks.
 	MaxTurns int `yaml:"max_turns"`
 
+	// MaxRetries is the maximum number of retry attempts for transient LLM
+	// errors (rate limits, 5xx, network errors). 0 = no retries (default).
+	MaxRetries int `yaml:"max_retries"`
+
+	// MaxToolConcurrency controls parallel tool execution. 0 or 1 = sequential.
+	MaxToolConcurrency int `yaml:"max_tool_concurrency"`
+
+	// AutoApprove skips tool call confirmation when true (default: false).
+	// Set to true for unattended/autonomous operation.
+	AutoApprove bool `yaml:"auto_approve"`
+
 	// ContextWindow is the model's context window in tokens. Used for compaction
 	// and overflow detection. (e.g. 200000 for claude-3-7-sonnet-20250219)
 	ContextWindow int `yaml:"context_window"`
