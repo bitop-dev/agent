@@ -140,14 +140,20 @@ no external tools required.
 |------|------|----------|-------------|
 | `pattern` | string | ✓ | Regular expression (Go `regexp` syntax) |
 | `path` | string | | File or directory to search (default: `work_dir`) |
-| `glob` | string | | File glob filter (e.g. `"*.go"`) |
-| `case_sensitive` | boolean | | Default: `false` (case-insensitive) |
-| `context_lines` | number | | Lines of context around each match |
-| `max_results` | number | | Cap on matches returned (default: 100) |
+| `glob` | string | | File glob filter (e.g. `"*.go"`, `"**/*.spec.ts"`) |
+| `ignoreCase` | boolean | | Case-insensitive search (default: `false`) |
+| `literal` | boolean | | Treat pattern as literal string, not regex (default: `false`) |
+| `context` | number | | Lines of context before/after each match (default: `0`) |
+| `limit` | number | | Cap on matches returned (default: `100`) |
+
+**Notes:**
+- Respects `.gitignore`. Skips `.git`, `node_modules`, and common binary files.
+- Long lines are truncated to 500 chars; use the `read` tool to see full lines.
+- Emits streaming progress updates every 100 files scanned in large trees.
 
 **Example LLM call:**
 ```json
-{"pattern": "func.*Handler", "path": ".", "glob": "*.go", "context_lines": 2}
+{"pattern": "func.*Handler", "path": ".", "glob": "*.go", "context": 2}
 ```
 
 ---
@@ -161,14 +167,19 @@ binary required.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
+| `pattern` | string | ✓ | Glob pattern to match files, e.g. `"*.go"`, `"**/*.json"` |
 | `path` | string | | Root directory to search (default: `work_dir`) |
-| `pattern` | string | | Glob or substring to match against file names |
-| `type` | string | | `"file"` \| `"dir"` \| `""` (both) |
-| `max_results` | number | | Cap on results returned (default: 200) |
+| `limit` | number | | Cap on results returned (default: `1000`) |
+
+**Notes:**
+- Respects `.gitignore`. Skips `.git` and `node_modules`.
+- Supports `**` glob patterns for recursive matching.
+- Emits streaming progress updates every 200 entries scanned.
+- Only matches files (not directories).
 
 **Example LLM call:**
 ```json
-{"path": ".", "pattern": "*_test.go", "type": "file"}
+{"pattern": "*_test.go", "path": "."}
 ```
 
 ---
@@ -223,6 +234,11 @@ are rendered as `[Image: alt text]`.
 |------|------|----------|-------------|
 | `url` | string | ✓ | URL to fetch |
 | `max_bytes` | number | | Max response bytes (default: 51200, max: 102400) |
+
+**Notes:**
+- Emits a `Fetching URL…` streaming progress update before the HTTP request.
+- Follows redirects (up to 10). Appended redirect notice when URL changes.
+- Content-Type is detected; HTML is converted, plain text/JSON returned as-is.
 
 **Example LLM call:**
 ```json

@@ -44,6 +44,19 @@ max_tokens: 4096
 # Recommended: 50 for general use, 200 for long agentic/research tasks.
 max_turns: 50
 
+# Retry transient LLM errors (rate limits, 5xx, network failures).
+# 0 = no retries (default). Uses exponential backoff capped at 60s.
+max_retries: 3
+
+# Run multiple tool calls in parallel when the LLM returns several at once.
+# 0 or 1 = sequential (default). > 1 enables parallel execution.
+max_tool_concurrency: 4
+
+# Auto-approve all tool calls without asking for confirmation.
+# false (default): tools run immediately (same as auto-approve for the CLI).
+# true: explicitly documents that this agent runs unattended.
+auto_approve: true
+
 # Sampling temperature (omit for provider default).
 temperature: 0.7
 
