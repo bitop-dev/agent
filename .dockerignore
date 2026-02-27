@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# CI/CD
+.github
+
+# Local config (may contain API keys)
+agent.yaml
+
+# Compiled binaries
+agent
+/basic
+/confirmation
+/custom-tool
+/sub-agent
+/web-agent
+/proxy-server
+/session-reader
+
+# Rust build artifacts (rebuilt in Docker)
+examples/tools/rust/target/
+
+# Test output
+TEST/
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Docs (not needed in image)
+docs/
+
+# Go test cache
+*.test
+*.out
+coverage.html
