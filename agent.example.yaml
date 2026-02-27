@@ -96,6 +96,21 @@ max_tokens: 4096
 max_turns: 50
 # temperature: 0.7
 
+# ── Reliability & Safety ──────────────────────────────────────────────────
+
+# Retry transient LLM errors (rate limits, 5xx, network errors) with
+# exponential backoff. 0 = no retries (default).
+max_retries: 3
+
+# Run tool calls in parallel when the LLM returns multiple in one turn.
+# 0 or 1 = sequential (default). Higher values reduce latency.
+# max_tool_concurrency: 4
+
+# Auto-approve all tool calls without confirmation. Set to true for
+# unattended/autonomous operation. When false (default), the ConfirmToolCall
+# hook in the Go SDK is checked; the CLI auto-approves by default.
+auto_approve: true
+
 # Context window size in tokens (used for compaction and overflow detection).
 # context_window: 200000
 
