@@ -32,14 +32,57 @@ Inspired by [pi-mono](https://github.com/badlogic/pi-mono)'s TypeScript agent.
 
 ---
 
+## Install
+
+**Download a binary** — grab the latest release for your platform:
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/bitop-dev/agent/releases/latest/download/agent_latest_darwin_arm64.tar.gz \
+  | tar -xz && sudo mv agent /usr/local/bin/
+
+# macOS (Intel)
+curl -L https://github.com/bitop-dev/agent/releases/latest/download/agent_latest_darwin_amd64.tar.gz \
+  | tar -xz && sudo mv agent /usr/local/bin/
+
+# Linux (amd64)
+curl -L https://github.com/bitop-dev/agent/releases/latest/download/agent_latest_linux_amd64.tar.gz \
+  | tar -xz && sudo mv agent /usr/local/bin/
+```
+
+**Go install** (requires Go 1.25+):
+
+```bash
+go install github.com/bitop-dev/agent/cmd/agent@latest
+```
+
+**Docker** (includes Python 3.12, Node.js 18, Ruby 3.2 for plugin tools):
+
+```bash
+docker pull ghcr.io/bitop-dev/agent:latest
+docker run --rm -it \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -v $(pwd)/agent.yaml:/etc/agent/agent.yaml \
+  -v $(pwd):/workspace \
+  ghcr.io/bitop-dev/agent:latest
+```
+
+**Build from source:**
+
+```bash
+git clone https://github.com/bitop-dev/agent.git && cd agent
+go build -o agent ./cmd/agent
+```
+
+See [docs/install.md](docs/install.md) for all options including Docker Compose,
+specific versions, and updating.
+
+---
+
 ## Quick Start
 
 ```bash
-# Build
-git clone https://github.com/bitop-dev/agent && cd agent
-go build -o agent ./cmd/agent
-
-# Configure
+# 1. Create a config
 cat > agent.yaml << 'EOF'
 provider: anthropic
 model: claude-sonnet-4-5
@@ -49,12 +92,12 @@ tools:
   preset: coding
 EOF
 
-# Run interactively
+# 2. Run interactively
 export ANTHROPIC_API_KEY=sk-ant-...
-./agent -config agent.yaml
+agent -config agent.yaml
 
-# One-shot
-./agent -config agent.yaml -prompt "Summarise this repository."
+# 3. One-shot
+agent -config agent.yaml -prompt "Summarise this repository."
 ```
 
 ---
@@ -366,7 +409,8 @@ ANTHROPIC_API_KEY=sk-... go run ./examples/confirmation
 
 | File | Topic |
 |------|-------|
-| [docs/quickstart.md](docs/quickstart.md) | Install, first config, first run |
+| [docs/install.md](docs/install.md) | Binary, go install, Docker, build from source |
+| [docs/quickstart.md](docs/quickstart.md) | First config and first run |
 | [docs/config.md](docs/config.md) | Complete configuration reference |
 | [docs/providers.md](docs/providers.md) | All providers with credentials |
 | [docs/tools.md](docs/tools.md) | Built-in tools reference |
