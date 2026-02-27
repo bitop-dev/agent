@@ -58,6 +58,7 @@ fn get_str<'a>(map: &'a HashMap<String, JsonVal>, key: &str) -> Option<&'a str> 
 // ── Minimal JSON parser ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum JsonVal {
     Str(String),
     Num(f64),
