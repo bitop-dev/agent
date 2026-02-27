@@ -1,0 +1,100 @@
+name: Generate Release Notes
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-notes:
+    name: AI Release Notes
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for changelog generation
+
+      # ── Install agent ──────────────────────────────────────────────────────
+      - name: Install agent
+        run: |
+          curl -sSL https://github.com/bitop-dev/agent/releases/latest/download/agent_latest_linux_amd64.tar.gz \
+            | tar -xz && sudo mv agent /usr/local/bin/agent
+
+      # ── Write config ───────────────────────────────────────────────────────
+      - name: Write config
+        run: |
+          cat > /tmp/agent.yaml << 'EOF'
+          provider: anthropic
+          model: claude-sonnet-4-5
+          api_key: ${ANTHROPIC_API_KEY}
+          max_tokens: 2048
+          max_turns: 5
+          auto_approve: true
+          tools:
+            preset: none
+          EOF
+
+      # ── Gather commits since last tag ──────────────────────────────────────
+      - name: Gather commits
+        id: commits
+        run: |
+          CURRENT_TAG="${{ github.ref_name }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")
+
+          if [[ -n "$PREV_TAG" ]]; then
+            echo "Generating notes from $PREV_TAG to $CURRENT_TAG"
+            COMMITS=$(git log "${PREV_TAG}..${CURRENT_TAG}" --oneline --no-merges)
+          else
+            echo "No previous tag — using last 30 commits"
+            COMMITS=$(git log --oneline --no-merges -30)
+          fi
+
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+          printf '%s' "$COMMITS" > /tmp/commits.txt
+          echo "Found $(wc -l < /tmp/commits.txt) commits"
+
+      # ── Generate release notes ─────────────────────────────────────────────
+      - name: Generate release notes
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          PREV="${{ steps.commits.outputs.prev_tag }}"
+          RANGE="${PREV:+from $PREV }to ${{ github.ref_name }}"
+
+          agent -config /tmp/agent.yaml -prompt "
+          Write GitHub release notes for version ${{ github.ref_name }} ($RANGE).
+
+          Commits:
+          $(cat /tmp/commits.txt)
+
+          Rules:
+          - Use GitHub Markdown
+          - Group into: ## ✨ Features, ## 🐛 Bug Fixes, ## 🔧 Other Changes
+          - Skip commits starting with: chore, test, docs, ci, Merge
+          - Each bullet point should be user-facing and action-oriented
+          - Start with a one-sentence summary of the release
+          - Keep it concise — this is a public release announcement
+          " > /tmp/release-notes.md
+
+          echo "Release notes:"
+          cat /tmp/release-notes.md
+
+      # ── Update the GitHub release ──────────────────────────────────────────
+      - name: Update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create or update the release with the generated notes
+          if gh release view "${{ github.ref_name }}" &>/dev/null; then
+            gh release edit "${{ github.ref_name }}" \
+              --notes-file /tmp/release-notes.md
+          else
+            gh release create "${{ github.ref_name }}" \
+              --title "${{ github.ref_name }}" \
+              --notes-file /tmp/release-notes.md
+          fi
+          echo "Release updated: ${{ github.ref_name }}"

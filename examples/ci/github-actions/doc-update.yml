@@ -1,0 +1,86 @@
+name: Auto-Update Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pkg/**/*.go"    # trigger when source changes
+
+permissions:
+  contents: write
+
+jobs:
+  update-docs:
+    name: Update SDK Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Use a PAT so the commit triggers other workflows if needed.
+          # Falls back to GITHUB_TOKEN (push won't trigger other workflows).
+          token: ${{ secrets.DOCS_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # ── Install agent ──────────────────────────────────────────────────────
+      - name: Install agent
+        run: |
+          curl -sSL https://github.com/bitop-dev/agent/releases/latest/download/agent_latest_linux_amd64.tar.gz \
+            | tar -xz && sudo mv agent /usr/local/bin/agent
+
+      # ── Write config ───────────────────────────────────────────────────────
+      - name: Write config
+        run: |
+          cat > /tmp/agent.yaml << 'EOF'
+          provider: anthropic
+          model: claude-sonnet-4-5
+          api_key: ${ANTHROPIC_API_KEY}
+          max_tokens: 8192
+          max_turns: 20
+          auto_approve: true
+          tools:
+            preset: coding
+            work_dir: .
+          EOF
+
+      # ── Update docs ────────────────────────────────────────────────────────
+      - name: Update SDK reference
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          agent -config /tmp/agent.yaml -prompt "
+          Read all exported types, functions, and methods in:
+          - pkg/agent/agent.go
+          - pkg/agent/types.go
+          - pkg/agent/config.go
+          - pkg/agent/subagent.go
+          - pkg/agent/reload.go
+
+          Then update docs/sdk.md so it accurately reflects the current API.
+
+          Rules:
+          - Preserve the existing document structure and headings
+          - Update any outdated function signatures, field names, or examples
+          - Add documentation for any exported symbols not yet covered
+          - Do not remove sections — only update or add
+          - Make minimal changes — only what is needed to keep the docs accurate
+          "
+
+      # ── Commit if changed ──────────────────────────────────────────────────
+      - name: Commit updated docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/sdk.md
+
+          if git diff --staged --quiet; then
+            echo "No changes to docs — nothing to commit"
+          else
+            git commit -m "docs: auto-update SDK reference [skip ci]"
+            git push
+            echo "Docs updated and pushed"
+          fi

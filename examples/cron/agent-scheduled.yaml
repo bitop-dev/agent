@@ -1,0 +1,31 @@
+# agent-scheduled.yaml
+# Config tuned for unattended cron / scheduled jobs.
+#
+# Key differences from interactive config:
+#   max_turns   — hard stop to prevent infinite tool loops
+#   auto_approve — skip human confirmation prompts (would hang the job)
+#   tools.preset — readonly unless the job needs to write files
+#
+# Copy this file, set your provider/model, and pass your API key
+# via environment variable so it is never stored in the file.
+
+provider: anthropic
+model: claude-sonnet-4-5
+api_key: ${ANTHROPIC_API_KEY}
+max_tokens: 4096
+max_turns: 20        # stop after 20 LLM turns regardless
+auto_approve: true   # no interactive confirmation
+
+system_prompt: |
+  You are an automated assistant running in a scheduled job.
+  Be concise. Prefer plain text output unless JSON is explicitly requested.
+  Do not ask clarifying questions — make a best-effort attempt and report results.
+
+tools:
+  preset: readonly   # read, grep, find, ls — safe for analysis jobs
+  work_dir: .        # override per script with -cwd flag
+
+compaction:
+  enabled: true
+  reserve_tokens: 8192
+  keep_recent_tokens: 10000
