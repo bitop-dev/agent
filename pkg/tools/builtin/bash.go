@@ -3,9 +3,7 @@ package builtin
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"sync"
 	"time"
 
@@ -17,10 +15,23 @@ import (
 // Output is tail-truncated to DefaultMaxLines / DefaultMaxBytes; the full
 // output is saved to a temp file when it exceeds that limit.
 type BashTool struct {
-	cwd string
+	cwd      string
+	executor Executor
 }
 
-func NewBashTool(cwd string) *BashTool { return &BashTool{cwd: cwd} }
+// NewBashTool creates a BashTool that runs commands locally.
+func NewBashTool(cwd string) *BashTool {
+	return &BashTool{cwd: cwd, executor: &LocalExecutor{}}
+}
+
+// NewBashToolWithExecutor creates a BashTool that delegates execution to exec.
+// Use this to run commands in Docker, SSH, sandboxes, etc.
+func NewBashToolWithExecutor(cwd string, exec Executor) *BashTool {
+	if exec == nil {
+		exec = &LocalExecutor{}
+	}
+	return &BashTool{cwd: cwd, executor: exec}
+}
 
 func (t *BashTool) Definition() ai.ToolDefinition {
 	return ai.ToolDefinition{
@@ -68,85 +79,57 @@ func (t *BashTool) Execute(ctx context.Context, _ string, params map[string]any,
 }
 
 func (t *BashTool) run(ctx context.Context, command string, timeoutSecs float64, onUpdate tools.UpdateFn) (tools.Result, error) {
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	cmd.Dir = t.cwd
-
-	pr, pw := io.Pipe()
-	cmd.Stdout = pw
-	cmd.Stderr = pw
-
-	if err := cmd.Start(); err != nil {
-		return tools.ErrorResult(fmt.Errorf("failed to start command: %w", err)), nil
-	}
-
-	// Rolling buffer state (shared between goroutines, protected by mu)
+	// Rolling buffer state (shared between the executor's onData callback and
+	// the main goroutine, protected by mu)
 	var mu sync.Mutex
-	var chunks [][]byte    // rolling window of recent data
-	var chunksBytes int    // total bytes in chunks
+	var chunks [][]byte // rolling window of recent data
+	var chunksBytes int
 	var totalBytes int
 	var tempFile *os.File
 	var tempPath string
 
-	const maxChunksBytes = DefaultMaxBytes * 2 // keep extra so tail always has enough
+	const maxChunksBytes = DefaultMaxBytes * 2
 
-	// Read goroutine
-	readDone := make(chan struct{})
-	go func() {
-		defer close(readDone)
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := pr.Read(buf)
-			if n > 0 {
-				chunk := make([]byte, n)
-				copy(chunk, buf[:n])
+	onData := func(chunk string) {
+		data := []byte(chunk)
+		mu.Lock()
+		totalBytes += len(data)
 
-				mu.Lock()
-				totalBytes += n
-
-				// Open temp file once we exceed the limit
-				if totalBytes > DefaultMaxBytes && tempFile == nil {
-					tf, terr := os.CreateTemp("", "agent-bash-*.log")
-					if terr == nil {
-						tempFile = tf
-						tempPath = tf.Name()
-						for _, c := range chunks {
-							tf.Write(c)
-						}
-					}
+		// Open temp file once we exceed the limit
+		if totalBytes > DefaultMaxBytes && tempFile == nil {
+			if tf, terr := os.CreateTemp("", "agent-bash-*.log"); terr == nil {
+				tempFile = tf
+				tempPath = tf.Name()
+				for _, c := range chunks {
+					tf.Write(c)
 				}
-				if tempFile != nil {
-					tempFile.Write(chunk)
-				}
-
-				chunks = append(chunks, chunk)
-				chunksBytes += n
-				// Trim old chunks
-				for chunksBytes > maxChunksBytes && len(chunks) > 1 {
-					chunksBytes -= len(chunks[0])
-					chunks = chunks[1:]
-				}
-
-				// Partial update
-				if onUpdate != nil {
-					combined := combineChunks(chunks)
-					tr := TruncateTail(string(combined), DefaultMaxLines, DefaultMaxBytes)
-					mu.Unlock()
-					onUpdate(tools.Result{
-						Content: []ai.ContentBlock{ai.TextContent{Type: "text", Text: tr.Content}},
-					})
-				} else {
-					mu.Unlock()
-				}
-			}
-			if err != nil {
-				break
 			}
 		}
-	}()
+		if tempFile != nil {
+			tempFile.Write(data)
+		}
 
-	cmdErr := cmd.Wait()
-	pw.Close()
-	<-readDone
+		chunks = append(chunks, data)
+		chunksBytes += len(data)
+		// Trim old chunks
+		for chunksBytes > maxChunksBytes && len(chunks) > 1 {
+			chunksBytes -= len(chunks[0])
+			chunks = chunks[1:]
+		}
+
+		if onUpdate != nil {
+			combined := combineChunks(chunks)
+			tr := TruncateTail(string(combined), DefaultMaxLines, DefaultMaxBytes)
+			mu.Unlock()
+			onUpdate(tools.Result{
+				Content: []ai.ContentBlock{ai.TextContent{Type: "text", Text: tr.Content}},
+			})
+		} else {
+			mu.Unlock()
+		}
+	}
+
+	_, execErr := t.executor.Exec(ctx, command, t.cwd, onData)
 
 	if tempFile != nil {
 		tempFile.Close()
@@ -161,7 +144,6 @@ func (t *BashTool) run(ctx context.Context, command string, timeoutSecs float64,
 	fullOutput := string(combined)
 	tr := TruncateTail(fullOutput, DefaultMaxLines, DefaultMaxBytes)
 
-	// Determine error type
 	timedOut := ctx.Err() == context.DeadlineExceeded
 	aborted := ctx.Err() == context.Canceled
 
@@ -215,8 +197,8 @@ func (t *BashTool) run(ctx context.Context, command string, timeoutSecs float64,
 		outputText += fmt.Sprintf("Command timed out after %.0f seconds", timeoutSecs)
 		return tools.TextResult(outputText), fmt.Errorf("command timed out")
 
-	case cmdErr != nil:
-		outputText += fmt.Sprintf("\n\nCommand exited with error: %v", cmdErr)
+	case execErr != nil:
+		outputText += fmt.Sprintf("\n\nCommand failed: %v", execErr)
 		return tools.TextResult(outputText), fmt.Errorf("%s", outputText)
 	}
 

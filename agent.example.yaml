@@ -1,33 +1,127 @@
-# Agent configuration
-# Environment variables are expanded everywhere: ${VAR_NAME}
+# Agent configuration — copy to agent.yaml and edit.
+# All ${ENV_VAR} references are expanded before parsing.
 
-provider: anthropic        # openai | anthropic | openrouter | groq | ollama | lmstudio | <any openai-compatible>
-model: claude-opus-4-5
-# base_url: https://openrouter.ai/api/v1   # required for openrouter, groq, ollama, etc.
+# ── Provider ───────────────────────────────────────────────────────────────
+#
+# provider         wire format      notes
+# ───────────────────────────────────────────────────────────────────────────
+# anthropic        Anthropic msgs   api_key = ANTHROPIC_API_KEY
+# google / gemini  Gemini REST/SSE  api_key = GEMINI_API_KEY
+# openai           Responses API ★  api_key = OPENAI_API_KEY
+# openai-completions  Chat Completions  same key; for proxies without Responses
+# azure            Completions      base_url = deployment endpoint, api_version
+# bedrock          ConverseStream   no api_key; uses AWS credential chain
+#
+# ★ openai is the Responses API — supported by OpenAI and growing number of
+#   proxies (OpenRouter, etc.). Set base_url to point at any compatible proxy.
+#
+# openai-compatible (completions) with built-in base URLs:
+#   openrouter  groq  xai  mistral  cerebras  huggingface
+#
+# anthropic-compatible with built-in base URLs:
+#   opencode  minimax  vercel-ai-gateway
+#
+# For any other provider, set base_url and use openai or openai-completions.
 
-api_key: ${ANTHROPIC_API_KEY}
+provider: anthropic
+model:    claude-opus-4-5
+api_key:  ${ANTHROPIC_API_KEY}
+
+# ── Provider examples (uncomment one block) ────────────────────────────────
+
+# Google Gemini:
+# provider: google
+# model:    gemini-2.5-flash
+# api_key:  ${GEMINI_API_KEY}
+
+# OpenAI Responses API (default endpoint):
+# provider: openai
+# model:    gpt-4o
+# api_key:  ${OPENAI_API_KEY}
+
+# OpenAI Responses API via a proxy (e.g. OpenRouter):
+# provider: openai
+# model:    openai/gpt-4o
+# api_key:  ${OPENROUTER_API_KEY}
+# base_url: https://openrouter.ai/api/v1
+
+# OpenAI Chat Completions (for proxies that don't support Responses yet):
+# provider: openai-completions
+# model:    gpt-4o
+# api_key:  ${OPENAI_API_KEY}
+# base_url: https://my-proxy.example.com/v1
+
+# Azure OpenAI:
+# provider:    azure
+# model:       gpt-4o                # deployment name (used for display only)
+# api_key:     ${AZURE_OPENAI_API_KEY}
+# base_url:    https://myresource.openai.azure.com/openai/deployments/gpt-4o
+# api_version: 2024-12-01-preview    # optional, defaults to 2024-12-01-preview
+
+# Amazon Bedrock (uses AWS credential chain — no api_key needed):
+# provider: bedrock
+# model:    us.anthropic.claude-opus-4-5-20251101-v1:0
+# region:   us-east-1    # optional; falls back to AWS_DEFAULT_REGION
+# profile:  default       # optional; falls back to AWS_PROFILE
+
+# Groq:
+# provider: groq
+# model:    llama-3.3-70b-versatile
+# api_key:  ${GROQ_API_KEY}
+
+# xAI (Grok):
+# provider: xai
+# model:    grok-3
+# api_key:  ${XAI_API_KEY}
+
+# Mistral:
+# provider: mistral
+# model:    mistral-large-latest
+# api_key:  ${MISTRAL_API_KEY}
+
+# ── Generation ─────────────────────────────────────────────────────────────
 
 system_prompt: |
   You are a helpful, concise assistant.
   When you use a tool, report the result clearly.
 
 max_tokens: 4096
+
+# Max LLM turns per prompt (0 = unlimited). Prevents infinite tool-call loops.
+# Each turn = one assistant response + all of its tool calls.
+# When the limit is hit the loop stops cleanly; the CLI prints:
+#   [agent] turn limit reached — stopping loop
+# EventTurnLimitReached is broadcast to any Go subscribers.
+# Recommended: 50 for general use, 200 for long research/agentic tasks.
+max_turns: 50
 # temperature: 0.7
 
+# Context window size in tokens (used for compaction and overflow detection).
+# context_window: 200000
+
+# Compaction: summarise old history when the context window fills up.
+# compaction:
+#   enabled: true
+#   context_window: 200000  # overrides top-level if set here
+#   reserve_tokens: 16384   # keep this many tokens free before triggering
+#   keep_recent_tokens: 20000  # tokens of recent history to preserve
+
+# ── Tools ──────────────────────────────────────────────────────────────────
+
 tools:
-  # Built-in tool preset:
+  # Built-in preset:
   #   coding   — read, bash, edit, write  (default)
   #   readonly — read, grep, find, ls
   #   all      — all seven tools
-  #   none     — no built-ins (plugin tools only)
+  #   none     — no built-ins
   preset: coding
 
   # Working directory for file tools (default: process cwd)
   # work_dir: /path/to/project
 
-  # External plugin tools — each is a subprocess speaking the JSON protocol.
-  # See examples/tools/bash_tool/main.go for a complete example.
+  # External plugin executables (JSON-over-stdin/stdout protocol)
   plugins: []
   # plugins:
-  #   - path: ./my_custom_tool
-  #   - path: ./web_search --engine duckduckgo
+  #   - path: ./my_tool
+  #   - path: ./web_search
+  #     args: [--engine, duckduckgo]

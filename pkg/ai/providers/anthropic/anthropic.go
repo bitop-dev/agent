@@ -55,6 +55,8 @@ type wireContent struct {
 	IsError   bool          `json:"is_error,omitempty"`
 	// Image
 	Source *wireImageSource `json:"source,omitempty"`
+	// Prompt caching
+	CacheControl *wireCacheCtrl `json:"cache_control,omitempty"`
 }
 
 type wireImageSource struct {
@@ -74,14 +76,31 @@ type wireTool struct {
 	InputSchema json.RawMessage `json:"input_schema"`
 }
 
+type wireThinking struct {
+	Type         string `json:"type"`                    // "enabled" or "adaptive"
+	BudgetTokens int    `json:"budget_tokens,omitempty"` // for budget-based thinking
+	Effort       string `json:"effort,omitempty"`        // for adaptive thinking
+}
+
+type wireSystemBlock struct {
+	Type        string          `json:"type"`                   // "text"
+	Text        string          `json:"text"`
+	CacheControl *wireCacheCtrl `json:"cache_control,omitempty"`
+}
+
+type wireCacheCtrl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
 type wireRequest struct {
-	Model     string        `json:"model"`
-	MaxTokens int           `json:"max_tokens"`
-	System    string        `json:"system,omitempty"`
-	Messages  []wireMessage `json:"messages"`
-	Tools     []wireTool    `json:"tools,omitempty"`
-	Stream    bool          `json:"stream"`
-	Temperature *float64   `json:"temperature,omitempty"`
+	Model       string        `json:"model"`
+	MaxTokens   int           `json:"max_tokens"`
+	System      any           `json:"system,omitempty"` // string or []wireSystemBlock
+	Messages    []wireMessage `json:"messages"`
+	Tools       []wireTool    `json:"tools,omitempty"`
+	Stream      bool          `json:"stream"`
+	Temperature *float64      `json:"temperature,omitempty"`
+	Thinking    *wireThinking `json:"thinking,omitempty"`
 }
 
 // SSE event payloads
@@ -111,10 +130,67 @@ type evMessageDelta struct {
 type evMessageStart struct {
 	Message struct {
 		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens               int `json:"input_tokens"`
+			OutputTokens              int `json:"output_tokens"`
+			CacheReadInputTokens      int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens  int `json:"cache_creation_input_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
+}
+
+// ---------------------------------------------------------------------------
+// Thinking helpers
+// ---------------------------------------------------------------------------
+
+// adaptiveModels support Anthropic's adaptive thinking (effort-based rather than budget-based).
+func supportsAdaptiveThinking(modelID string) bool {
+	return contains(modelID, "opus-4-6") || contains(modelID, "opus-4.6") ||
+		contains(modelID, "sonnet-4-6") || contains(modelID, "sonnet-4.6")
+}
+
+func contains(s, substr string) bool { return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr)) }
+func containsStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+// buildThinking constructs the thinking wire object (or nil if thinking is off).
+// Also adjusts maxTokens when budget-based thinking is used.
+func buildThinking(modelID string, opts ai.StreamOptions, maxTokens int) *wireThinking {
+	level := opts.ThinkingLevel
+	if level == "" || level == ai.ThinkingOff {
+		return nil
+	}
+
+	if supportsAdaptiveThinking(modelID) {
+		effort := mapEffort(level, modelID)
+		return &wireThinking{Type: "adaptive", Effort: effort}
+	}
+
+	budget := opts.ThinkingBudgets.ThinkingBudgetFor(level)
+	return &wireThinking{Type: "enabled", BudgetTokens: budget}
+}
+
+func mapEffort(level ai.ThinkingLevel, modelID string) string {
+	switch level {
+	case ai.ThinkingMinimal, ai.ThinkingLow:
+		return "low"
+	case ai.ThinkingMedium:
+		return "medium"
+	case ai.ThinkingHigh:
+		return "high"
+	case ai.ThinkingXHigh:
+		if containsStr(modelID, "opus-4-6") || containsStr(modelID, "opus-4.6") {
+			return "max"
+		}
+		return "high"
+	default:
+		return "high"
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -159,9 +235,31 @@ func (p *Provider) stream(
 	req := wireRequest{
 		Model:       model,
 		MaxTokens:   maxTokens,
-		System:      llmCtx.SystemPrompt,
 		Stream:      true,
 		Temperature: opts.Temperature,
+	}
+
+	// System prompt — wrap in cache block when caching is enabled.
+	caching := opts.CacheRetention != ai.CacheRetentionNone
+	if llmCtx.SystemPrompt != "" {
+		if caching {
+			req.System = []wireSystemBlock{{
+				Type:         "text",
+				Text:         llmCtx.SystemPrompt,
+				CacheControl: &wireCacheCtrl{Type: "ephemeral"},
+			}}
+		} else {
+			req.System = llmCtx.SystemPrompt
+		}
+	}
+
+	// Thinking / extended reasoning
+	thinking := buildThinking(model, opts, maxTokens)
+	if thinking != nil {
+		req.Thinking = thinking
+		// Thinking requires temperature ≤ 1 and disallows temperature=0;
+		// if the caller set an explicit temperature, leave it; otherwise clear it.
+		// (Anthropic rejects temperature outside [1,1] for budget thinking.)
 	}
 
 	for _, m := range llmCtx.Messages {
@@ -170,6 +268,15 @@ func (p *Provider) stream(
 			return nil, err
 		}
 		req.Messages = append(req.Messages, wm)
+	}
+
+	// Add cache breakpoint on the last user message (promotes stable prefix caching).
+	if caching && len(req.Messages) > 0 {
+		last := &req.Messages[len(req.Messages)-1]
+		if last.Role == "user" && len(last.Content) > 0 {
+			// Tag the last content block with cache_control.
+			last.Content[len(last.Content)-1].CacheControl = &wireCacheCtrl{Type: "ephemeral"}
+		}
 	}
 
 	for _, t := range llmCtx.Tools {
@@ -189,6 +296,9 @@ func (p *Provider) stream(
 	httpReq.Header.Set("x-api-key", opts.APIKey)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
 	httpReq.Header.Set("Accept", "text/event-stream")
+	if thinking != nil {
+		httpReq.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14")
+	}
 
 	resp, err := p.HTTPClient.Do(httpReq)
 	if err != nil {
@@ -242,6 +352,8 @@ func (p *Provider) stream(
 			var ms evMessageStart
 			if json.Unmarshal([]byte(ev.Data), &ms) == nil {
 				partial.Usage.Input = ms.Message.Usage.InputTokens
+				partial.Usage.CacheRead = ms.Message.Usage.CacheReadInputTokens
+				partial.Usage.CacheWrite = ms.Message.Usage.CacheCreationInputTokens
 			}
 			events <- ai.StreamEvent{Type: ai.StreamEventStart, Partial: snapshotMsg(partial)}
 			emittedStart = true
@@ -318,7 +430,8 @@ func (p *Provider) stream(
 			if json.Unmarshal([]byte(ev.Data), &md) == nil {
 				partial.StopReason = mapStopReason(md.Delta.StopReason)
 				partial.Usage.Output = md.Usage.OutputTokens
-				partial.Usage.TotalTokens = partial.Usage.Input + partial.Usage.Output
+				partial.Usage.TotalTokens = partial.Usage.Input + partial.Usage.Output +
+					partial.Usage.CacheRead + partial.Usage.CacheWrite
 			}
 
 		case "message_stop":

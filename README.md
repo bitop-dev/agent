@@ -1,219 +1,364 @@
-# agent — Go LLM agent framework
+# agent — Go LLM Agent Framework
 
-A minimal, config-driven agentic framework inspired by pi-mono's `packages/agent`.
-Compile one binary, point it at a YAML config, wire in tools.
+A minimal, config-driven agentic framework written in pure Go. Point it at a
+YAML config and run. Embed it in your own programs. Extend it with custom
+tools in Go or any other language.
+
+Inspired by [pi-mono](https://github.com/badlogic/pi-mono)'s TypeScript agent.
 
 ---
 
-## Project layout
+## Features
+
+- **6 LLM providers** — Anthropic, OpenAI (Responses + Completions), Google Gemini, Azure OpenAI, Amazon Bedrock, and any OpenAI-compatible endpoint
+- **9 built-in tools** — `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_search`, `web_fetch`
+- **Plugin tools** — external executables over JSON/stdin/stdout, any language
+- **Session persistence** — JSONL files, resume any session, fork into branches
+- **Context compaction** — auto-summarise old context to stay within the model's window
+- **Skills** — Markdown files with specialised instructions, discovered automatically
+- **Prompt templates** — `/template arg1 arg2` expansion in the REPL
+- **Model registry** — 30+ models with context windows, costs, and capability flags
+- **Proxy** — serve any provider as an HTTP proxy; connect via `provider: proxy`
+- **HTML export** — self-contained dark-mode HTML from any session
+
+---
+
+## Quick Start
+
+```bash
+# Build
+git clone https://github.com/nickcecere/agent && cd agent
+go build -o agent ./cmd/agent
+
+# Configure
+cat > agent.yaml << 'EOF'
+provider: anthropic
+model: claude-sonnet-4-5
+api_key: ${ANTHROPIC_API_KEY}
+max_tokens: 4096
+tools:
+  preset: coding
+EOF
+
+# Run interactively
+export ANTHROPIC_API_KEY=sk-ant-...
+./agent -config agent.yaml
+
+# One-shot
+./agent -config agent.yaml -prompt "Summarise this repository."
+```
+
+---
+
+## Project Layout
 
 ```
 agent/
-├── cmd/agent/            # CLI binary
-├── pkg/
-│   ├── ai/               # Core types: messages, content blocks, streaming events
-│   │   ├── sse/          # SSE reader used by providers
-│   │   └── providers/
-│   │       ├── openai/   # OpenAI chat-completions (+ any OpenAI-compatible)
-│   │       └── anthropic/ # Anthropic messages API
-│   ├── tools/            # Tool interface, registry, subprocess plugin protocol
-│   └── agent/            # Agent struct, event system, loop, config loader
-├── examples/tools/
-│   └── bash_tool/        # Example external tool plugin
-└── agent.example.yaml    # Annotated config example
+├── cmd/agent/                    # CLI binary
+├── docs/                         # Full documentation
+│   ├── quickstart.md
+│   ├── config.md                 # All config fields
+│   ├── providers.md              # Provider setup
+│   ├── tools.md                  # Built-in tools + writing your own
+│   ├── session.md                # Session persistence + JSONL format
+│   ├── compaction.md             # Automatic context compaction
+│   ├── skills.md                 # Skills system
+│   ├── prompt-templates.md       # Prompt templates
+│   ├── sdk.md                    # Go library usage
+│   ├── proxy.md                  # Proxy provider
+│   └── models.md                 # Model registry
+├── examples/
+│   ├── basic/                    # Minimal embedded agent
+│   ├── custom-tool/              # Compiled-in custom tools
+│   ├── web-agent/                # Agent with web search + fetch
+│   ├── proxy-server/             # HTTP proxy server
+│   ├── session-reader/           # Read and export sessions
+│   ├── tools/bash_tool/          # External subprocess plugin
+│   ├── skills/go-expert/         # Example skill file
+│   └── prompts/                  # Example prompt templates
+└── pkg/
+    ├── ai/                       # Core types, streaming events, Provider interface
+    │   ├── sse/                  # SSE reader (no external deps)
+    │   ├── models/               # Model registry (30+ models)
+    │   └── providers/
+    │       ├── anthropic/        # Anthropic Messages API
+    │       ├── openai/           # Chat Completions + Responses API
+    │       ├── google/           # Google Generative AI
+    │       ├── azure/            # Azure OpenAI
+    │       ├── bedrock/          # Amazon Bedrock ConverseStream
+    │       └── proxy/            # HTTP proxy client + server handler
+    ├── agent/                    # Agent struct, event loop, compaction
+    ├── tools/                    # Tool interface, registry, plugin protocol
+    │   └── builtin/              # read, bash, edit, write, grep, find, ls,
+    │                             # web_search, web_fetch
+    ├── session/                  # JSONL persistence, fork, HTML export
+    ├── skills/                   # Skill discovery and loading
+    └── prompts/                  # Prompt template loading and expansion
 ```
 
 ---
 
-## Quick start
-
-```bash
-# 1. Copy and edit the config
-cp agent.example.yaml agent.yaml
-$EDITOR agent.yaml
-
-# 2. Build the agent binary
-go build -o agent ./cmd/agent
-
-# 3. Run interactive mode
-./agent -config agent.yaml
-
-# 4. Or one-shot
-./agent -config agent.yaml -prompt "What is the capital of France?"
-```
-
----
-
-## Config file
+## Configuration
 
 ```yaml
-provider: anthropic          # openai | anthropic | openrouter | groq | ollama | …
-model: claude-opus-4-5
-api_key: ${ANTHROPIC_API_KEY} # env-var expansion supported anywhere
+provider: anthropic              # Required
+model: claude-sonnet-4-5         # Required
+api_key: ${ANTHROPIC_API_KEY}    # ${ENV_VAR} expanded
 
 system_prompt: |
-  You are a helpful assistant.
+  You are a helpful coding assistant.
 
 max_tokens: 4096
-# temperature: 0.7
-# base_url: https://openrouter.ai/api/v1  # required for non-default endpoints
+temperature: 0.7
+thinking_level: medium           # off | minimal | low | medium | high | xhigh
+cache_retention: short           # none | short | long  (Anthropic caching)
 
-plugins:
-  - path: ./examples/tools/bash_tool/bash_tool
+# Max LLM turns per prompt (0 = unlimited).
+# Each turn = one assistant response + its tool calls.
+# Prevents infinite loops when a model repeatedly calls tools.
+# Recommended: 50 for general use, 200 for long agentic/research tasks.
+max_turns: 50
+
+context_window: 200000           # Auto-filled from model registry if known
+
+compaction:
+  enabled: true
+  reserve_tokens: 16384
+  keep_recent_tokens: 20000
+
+tools:
+  preset: coding                 # coding | readonly | web | all | none
+  work_dir: .
+  plugins:
+    - path: ./my-plugin
 ```
 
-All `${ENV_VAR}` references are expanded before parsing, so you never have to
-hard-code secrets.
+See [docs/config.md](docs/config.md) for the complete reference.
 
 ---
 
-## Built-in tool plugins
+## Providers
 
-### `bash_tool`
+| Provider | Config value | Notes |
+|----------|-------------|-------|
+| Anthropic | `anthropic` | Claude 3.x / 4.x, caching, thinking |
+| OpenAI Responses | `openai-responses` | GPT-4o, o1, o3 |
+| OpenAI Completions | `openai-completions` | Also for OpenRouter, Ollama, Groq, etc. |
+| Google | `google` | Gemini 1.5 / 2.0 / 2.5 |
+| Azure OpenAI | `azure` | Chat Completions |
+| Amazon Bedrock | `bedrock` | ConverseStream, IAM auth |
+| Proxy | `proxy` | Connect to another agent instance |
 
-Runs arbitrary bash commands and returns stdout+stderr.
+See [docs/providers.md](docs/providers.md) for details and environment variables.
+
+---
+
+## Built-in Tools
+
+| Tool | Preset | Description |
+|------|--------|-------------|
+| `read` | coding, readonly, all | Read a file (with offset/limit) |
+| `bash` | coding, all | Execute shell commands |
+| `edit` | coding, all | Replace exact text in a file |
+| `write` | coding, all | Create or overwrite a file |
+| `grep` | readonly, all | Regex search across files (pure Go) |
+| `find` | readonly, all | Recursive file finder (pure Go) |
+| `ls` | readonly, all | List directory contents |
+| `web_search` | web, all | DuckDuckGo search (no API key) |
+| `web_fetch` | web, all | Fetch URL as clean plain text |
+
+All tools truncate output to 50 KB / 2000 lines. See [docs/tools.md](docs/tools.md).
+
+---
+
+## CLI Flags
 
 ```bash
-go build -o bash_tool ./examples/tools/bash_tool
+./agent [flags]
+
+Flags:
+  -config <path>     Config file (default: agent.yaml)
+  -prompt <text>     One-shot prompt; skips interactive REPL
+  -cwd <dir>         Working directory for file tools
+  -session <id>      Resume session by ID prefix
+  -sessions          List recent sessions and exit
+```
+
+## Interactive Commands
+
+```
+/clear              Reset conversation history
+/state              Show message count, streaming status
+/model <id>         Switch model (e.g. /model gpt-4o)
+/session            Show current session ID and file
+/sessions           List recent sessions
+/export             Export session as HTML
+/skills             List loaded skills
+/templates          List loaded prompt templates
+/fork [N]           Fork session keeping last N messages
+exit / quit         Exit
 ```
 
 ---
 
-## Writing your own tool
-
-### Option A — compile into the binary
-
-Implement `tools.Tool`:
+## Using as a Go Library
 
 ```go
-type MyTool struct{}
+import (
+    "github.com/nickcecere/agent/pkg/agent"
+    "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
+    "github.com/nickcecere/agent/pkg/tools"
+    "github.com/nickcecere/agent/pkg/tools/builtin"
+)
 
-func (t MyTool) Definition() ai.ToolDefinition {
-    return ai.ToolDefinition{
-        Name:        "my_tool",
-        Description: "Does something useful.",
-        Parameters: tools.MustSchema(tools.SimpleSchema{
-            Properties: map[string]tools.Property{
-                "input": {Type: "string", Description: "The input value."},
-            },
-            Required: []string{"input"},
-        }),
+provider := anthropic.New(os.Getenv("ANTHROPIC_API_KEY"))
+
+reg := tools.NewRegistry()
+builtin.Register(reg, builtin.PresetCoding, ".")
+
+a := agent.New(provider, "claude-sonnet-4-5", reg, "You are helpful.")
+
+a.Subscribe(func(e agent.Event) {
+    if e.Type == agent.EventMessageUpdate {
+        if se := e.StreamEvent; se != nil {
+            fmt.Print(se.Delta)
+        }
     }
-}
+})
 
-func (t MyTool) Execute(ctx context.Context, callID string, params map[string]any, onUpdate tools.UpdateFn) (tools.Result, error) {
-    input, _ := params["input"].(string)
-    return tools.TextResult("you said: " + input), nil
-}
-```
-
-Register it before creating the agent:
-
-```go
-registry := tools.NewRegistry()
-registry.Register(MyTool{})
-
-ag := agent.New(agent.Options{
-    Provider: openai.New(""),
-    Model:    "gpt-4o",
-    Tools:    registry,
+a.Run(ctx, []ai.Message{userMsg}, agent.Config{
+    StreamOptions: ai.StreamOptions{MaxTokens: 2048},
+    MaxTurns:      50, // stop after 50 turns; 0 = unlimited
 })
 ```
 
-### Option B — external subprocess plugin
+See [docs/sdk.md](docs/sdk.md) for the full API reference.
 
-Write any executable that speaks the JSON-over-stdin/stdout protocol:
+---
 
+## Skills
+
+Put Markdown files in `~/.config/agent/skills/` (global) or
+`.agent/skills/` (project) with YAML frontmatter:
+
+```markdown
+---
+name: go-expert
+description: Expert Go programming guidance. Use for Go code tasks.
+---
+
+# Instructions
+...
 ```
-← {"type":"describe"}
-→ {"name":"my_tool","description":"...","parameters":{...}}
 
-← {"type":"call","call_id":"abc123","params":{"input":"hello"}}
-→ {"content":[{"type":"text","text":"you said: hello"}],"error":false}
+The agent lists available skills in its system prompt and reads them on demand
+via the `read` tool. See [docs/skills.md](docs/skills.md) and
+`examples/skills/go-expert/SKILL.md`.
+
+---
+
+## Prompt Templates
+
+Put Markdown files in `~/.config/agent/prompts/` or `.agent/prompts/`:
+
+```markdown
+---
+description: Review a file for correctness and style.
+---
+
+Review `$1` for correctness, idiomatic style, and test coverage.
 ```
 
-Then add it to the config:
+Invoke with `/review pkg/agent/loop.go`. See [docs/prompt-templates.md](docs/prompt-templates.md).
+
+---
+
+## Session Files
+
+Sessions are stored at `~/.config/agent/sessions/YYYYMMDD-HHMMSS-<id>.jsonl`.
+
+```bash
+# List sessions
+./agent -sessions
+
+# Resume by ID prefix
+./agent -session a3f7c9
+
+# Export as HTML
+# (in REPL)
+/export
+```
+
+See [docs/session.md](docs/session.md) and `examples/session-reader/`.
+
+---
+
+## Context Compaction
+
+When the conversation grows close to the model's context limit, the agent
+automatically summarises old messages and continues. Config:
 
 ```yaml
-plugins:
-  - path: ./my_tool_binary
+compaction:
+  enabled: true
+  reserve_tokens: 16384      # room for response
+  keep_recent_tokens: 20000  # always kept verbatim
 ```
 
-The agent starts the process once and keeps it alive for the session.
-See `examples/tools/bash_tool/main.go` for a complete example.
+See [docs/compaction.md](docs/compaction.md).
 
 ---
 
-## Using the agent in your own Go code
+## Examples
 
-```go
-package main
+| Example | What it shows |
+|---------|---------------|
+| `examples/basic/` | Minimal embedded agent with REPL |
+| `examples/custom-tool/` | Calculator + dice roller custom tools |
+| `examples/web-agent/` | Research agent with `web_search` + `web_fetch` |
+| `examples/proxy-server/` | HTTP proxy for any upstream provider |
+| `examples/session-reader/` | List, display, export session files |
+| `examples/tools/bash_tool/` | External subprocess plugin (JSON protocol) |
+| `examples/skills/go-expert/` | Example skill file |
+| `examples/prompts/` | `review.md`, `test.md`, `explain.md` templates |
 
-import (
-    "context"
-    "fmt"
+Run any example:
 
-    "github.com/nickcecere/agent/pkg/agent"
-    "github.com/nickcecere/agent/pkg/ai"
-    "github.com/nickcecere/agent/pkg/ai/providers/anthropic"
-    "github.com/nickcecere/agent/pkg/tools"
-)
-
-func main() {
-    registry := tools.NewRegistry()
-    // registry.Register(MyTool{})
-
-    ag := agent.New(agent.Options{
-        SystemPrompt: "You are a helpful assistant.",
-        Model:        "claude-opus-4-5",
-        Provider:     anthropic.New(""),
-        Tools:        registry,
-    })
-
-    // Stream output to terminal
-    ag.Subscribe(func(ev agent.Event) {
-        if ev.Type == agent.EventMessageUpdate && ev.StreamEvent != nil {
-            if ev.StreamEvent.Type == ai.StreamEventTextDelta {
-                fmt.Print(ev.StreamEvent.Delta)
-            }
-        }
-        if ev.Type == agent.EventMessageEnd && ev.Message.GetRole() == ai.RoleAssistant {
-            fmt.Println()
-        }
-    })
-
-    cfg := agent.Config{
-        StreamOptions: ai.StreamOptions{
-            APIKey:    "sk-ant-...",
-            MaxTokens: 4096,
-        },
-    }
-
-    if err := ag.Prompt(context.Background(), "Hello!", cfg); err != nil {
-        panic(err)
-    }
-}
+```bash
+ANTHROPIC_API_KEY=sk-... go run ./examples/basic
+OPENAI_API_KEY=sk-...    go run ./examples/web-agent "Latest news in Go"
+                         go run ./examples/session-reader list
 ```
 
 ---
 
-## Architecture
+## Documentation
 
-```
-Prompt()
-  └─ runLoop()                     agent/loop.go
-       ├─ streamResponse()         → provider.Stream() → SSE events
-       │    └─ broadcast(message_update) for each text delta
-       └─ executeToolCalls()
-            ├─ registry.Get(name).Execute()
-            └─ broadcast(tool_start / tool_end)
-```
+| File | Topic |
+|------|-------|
+| [docs/quickstart.md](docs/quickstart.md) | Install, first config, first run |
+| [docs/config.md](docs/config.md) | Complete configuration reference |
+| [docs/providers.md](docs/providers.md) | All providers with credentials |
+| [docs/tools.md](docs/tools.md) | Built-in tools + writing your own |
+| [docs/session.md](docs/session.md) | Session format, JSONL, branching |
+| [docs/compaction.md](docs/compaction.md) | Context compaction |
+| [docs/skills.md](docs/skills.md) | Skills system |
+| [docs/prompt-templates.md](docs/prompt-templates.md) | Prompt templates |
+| [docs/sdk.md](docs/sdk.md) | Go library API |
+| [docs/proxy.md](docs/proxy.md) | Proxy provider |
+| [docs/models.md](docs/models.md) | Model registry |
 
-**Steering** — call `ag.SteerText("…")` while the agent is running.
-The message is injected after the current tool call finishes, remaining
-tool calls are skipped.
+---
 
-**Follow-up** — call `ag.FollowUpText("…")` while running.
-The message is injected only when the agent would otherwise stop.
+## Contributing
 
-**Abort** — call `ag.Abort()` to cancel the current run via context.
+1. Fork the repo
+2. `go test ./...` — all tests must pass
+3. `go vet ./...` — no vet errors
+4. Open a pull request
+
+---
+
+## License
+
+MIT

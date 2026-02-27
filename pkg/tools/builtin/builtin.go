@@ -16,8 +16,11 @@ const (
 	// without modification.
 	PresetReadOnly Preset = "readonly"
 
-	// PresetAll registers all seven tools.
+	// PresetAll registers all built-in tools including web search and fetch.
 	PresetAll Preset = "all"
+
+	// PresetWeb registers web_search and web_fetch only.
+	PresetWeb Preset = "web"
 
 	// PresetNone registers nothing; useful when you only want plugin tools.
 	PresetNone Preset = "none"
@@ -52,6 +55,12 @@ func Register(reg *tools.Registry, preset Preset, cwd string) {
 		reg.Register(NewGrepTool(cwd))
 		reg.Register(NewFindTool(cwd))
 		reg.Register(NewLsTool(cwd))
+		reg.Register(NewWebSearchTool())
+		reg.Register(NewWebFetchTool())
+
+	case PresetWeb:
+		reg.Register(NewWebSearchTool())
+		reg.Register(NewWebFetchTool())
 
 	case PresetNone:
 		// nothing

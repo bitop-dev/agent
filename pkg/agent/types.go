@@ -31,7 +31,32 @@ const (
 	EventToolStart  EventType = "tool_start"
 	EventToolUpdate EventType = "tool_update"
 	EventToolEnd    EventType = "tool_end"
+
+	// Compaction
+	EventCompaction EventType = "compaction"
+
+	// Turn limit reached — loop stopped before the LLM finished naturally.
+	EventTurnLimitReached EventType = "turn_limit_reached"
 )
+
+// ContextUsage carries a snapshot of estimated context token usage after a turn.
+type ContextUsage struct {
+	// Estimated total tokens in the current context window.
+	Tokens int
+	// Tokens reported by the last assistant message's usage object.
+	UsageTokens int
+	// Estimated tokens added after the last usage report (tool results, etc.)
+	TrailingTokens int
+}
+
+// CompactionEvent describes a completed context compaction.
+type CompactionEvent struct {
+	Summary         string
+	MessagesRemoved int
+	MessagesKept    int
+	TokensBefore    int
+	TokensAfter     int
+}
 
 // Event carries a lifecycle notification from the agent loop.
 type Event struct {
@@ -44,7 +69,11 @@ type Event struct {
 	StreamEvent *ai.StreamEvent
 
 	// Set for turn_end
-	ToolResults []ai.ToolResultMessage
+	ToolResults  []ai.ToolResultMessage
+	ContextUsage ContextUsage // estimated context token usage after this turn
+
+	// Set for compaction events
+	Compaction *CompactionEvent
 
 	// Set for tool_* events
 	ToolCallID string
@@ -63,13 +92,14 @@ type Event struct {
 
 // State is the observable state of the agent (read-only snapshot).
 type State struct {
-	SystemPrompt    string
-	Model           string
-	Provider        string
-	Messages        []ai.Message
-	IsStreaming      bool
-	PendingToolCalls map[string]bool // callID → in-flight
-	Error           string
+	SystemPrompt     string
+	Model            string
+	Provider         string
+	Messages         []ai.Message
+	IsStreaming       bool
+	PendingToolCalls  map[string]bool // callID → in-flight
+	Error            string
+	ContextTokens    int // estimated context size after the last turn
 }
 
 // ---------------------------------------------------------------------------
@@ -97,4 +127,14 @@ type Config struct {
 
 	// StreamOptions passed to the provider.
 	StreamOptions ai.StreamOptions
+
+	// MaxTurns is the maximum number of LLM calls (turns) per Run.
+	// Each turn = one assistant response + its tool calls.
+	// 0 means unlimited (default). When the limit is hit the loop stops
+	// and an EventTurnLimitReached event is broadcast.
+	MaxTurns int
 }
+
+// DefaultMaxTurns is used by the CLI when no explicit limit is set.
+// 0 = unlimited; change to a non-zero value to cap all runs.
+const DefaultMaxTurns = 0

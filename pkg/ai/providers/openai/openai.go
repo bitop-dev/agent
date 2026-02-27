@@ -108,6 +108,9 @@ type chunkUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
 }
 
 type streamChunk struct {
@@ -234,6 +237,9 @@ func (p *Provider) stream(
 				partial.Usage.Input = chunk.Usage.PromptTokens
 				partial.Usage.Output = chunk.Usage.CompletionTokens
 				partial.Usage.TotalTokens = chunk.Usage.TotalTokens
+				if chunk.Usage.PromptTokensDetails != nil {
+					partial.Usage.CacheRead = chunk.Usage.PromptTokensDetails.CachedTokens
+				}
 			}
 			continue
 		}

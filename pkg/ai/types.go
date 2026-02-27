@@ -186,11 +186,100 @@ type Context struct {
 }
 
 // ---------------------------------------------------------------------------
+// Thinking / reasoning
+// ---------------------------------------------------------------------------
+
+// ThinkingLevel controls how much extended reasoning a model performs.
+// Not all providers or models support all levels.
+//
+//   - "off"     — disable thinking/reasoning entirely
+//   - "minimal" — shortest possible thinking trace
+//   - "low"     — light reasoning (fast, cheap)
+//   - "medium"  — balanced (default for most tasks)
+//   - "high"    — thorough reasoning
+//   - "xhigh"   — maximum (only supported by select OpenAI models)
+type ThinkingLevel string
+
+const (
+	ThinkingOff     ThinkingLevel = "off"
+	ThinkingMinimal ThinkingLevel = "minimal"
+	ThinkingLow     ThinkingLevel = "low"
+	ThinkingMedium  ThinkingLevel = "medium"
+	ThinkingHigh    ThinkingLevel = "high"
+	ThinkingXHigh   ThinkingLevel = "xhigh"
+)
+
+// ThinkingBudgets holds custom token budgets per thinking level.
+// Only relevant for budget-based providers (Anthropic older models, Google Gemini).
+// Zero means "use the provider default for that level".
+type ThinkingBudgets struct {
+	Minimal int
+	Low     int
+	Medium  int
+	High    int
+}
+
+// defaultThinkingBudgets are the token budgets used when no custom budgets
+// are provided. Sized to match pi-mono's defaults.
+var defaultThinkingBudgets = ThinkingBudgets{
+	Minimal: 1024,
+	Low:     2048,
+	Medium:  8192,
+	High:    16384,
+}
+
+// ThinkingBudgetFor returns the token budget for the given level,
+// using the custom budgets if non-zero, otherwise the defaults.
+func (b ThinkingBudgets) ThinkingBudgetFor(level ThinkingLevel) int {
+	clamp := level
+	if clamp == ThinkingXHigh {
+		clamp = ThinkingHigh // xhigh is only meaningful for OpenAI
+	}
+	var custom int
+	switch clamp {
+	case ThinkingMinimal:
+		custom = b.Minimal
+	case ThinkingLow:
+		custom = b.Low
+	case ThinkingMedium:
+		custom = b.Medium
+	case ThinkingHigh:
+		custom = b.High
+	}
+	if custom > 0 {
+		return custom
+	}
+	switch clamp {
+	case ThinkingMinimal:
+		return defaultThinkingBudgets.Minimal
+	case ThinkingLow:
+		return defaultThinkingBudgets.Low
+	case ThinkingMedium:
+		return defaultThinkingBudgets.Medium
+	default:
+		return defaultThinkingBudgets.High
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Stream options
 // ---------------------------------------------------------------------------
 
+// CacheRetention controls prompt caching aggressiveness for providers that
+// support it (primarily Anthropic).
+type CacheRetention string
+
+const (
+	CacheRetentionNone  CacheRetention = "none"
+	CacheRetentionShort CacheRetention = "short" // default
+	CacheRetentionLong  CacheRetention = "long"
+)
+
 type StreamOptions struct {
-	Temperature *float64
-	MaxTokens   int
-	APIKey      string
+	Temperature    *float64
+	MaxTokens      int
+	APIKey         string
+	ThinkingLevel  ThinkingLevel
+	ThinkingBudgets ThinkingBudgets
+	CacheRetention CacheRetention
 }

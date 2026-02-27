@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -41,18 +40,18 @@ func (a *Agent) runLoop(
 
 	var pendingMessages []ai.Message
 
-	firstTurn := true
+	turnCount := 0
 	for {
 		hasToolCalls := true
 		var steeringAfterTools []ai.Message
 
 		for hasToolCalls || len(pendingMessages) > 0 {
-			if !firstTurn {
-				emit(Event{Type: EventTurnStart})
-			} else {
-				emit(Event{Type: EventTurnStart})
-				firstTurn = false
+			// ── Max-turn guard ──────────────────────────────────────────
+			if cfg.MaxTurns > 0 && turnCount >= cfg.MaxTurns {
+				emit(Event{Type: EventTurnLimitReached})
+				return nil
 			}
+			turnCount++
 
 			// Inject steering / follow-up messages
 			for _, m := range pendingMessages {
@@ -61,6 +60,12 @@ func (a *Agent) runLoop(
 				emit(Event{Type: EventMessageEnd, Message: m})
 			}
 			pendingMessages = nil
+
+			// Compact context if needed (before next LLM call).
+			if err := a.maybeCompact(ctx); err != nil {
+				// Non-fatal: log and continue without compaction.
+				fmt.Printf("compaction warning: %v\n", err)
+			}
 
 			// Stream assistant response
 			assistantMsg, err := a.streamResponse(ctx, cfg, emit)
@@ -97,7 +102,8 @@ func (a *Agent) runLoop(
 				}
 			}
 
-			emit(Event{Type: EventTurnEnd, Message: assistantMsg, ToolResults: toolResults})
+			usage := EstimateContextTokens(a.snapshotMessages())
+			emit(Event{Type: EventTurnEnd, Message: assistantMsg, ToolResults: toolResults, ContextUsage: usage})
 
 			if len(steeringAfterTools) > 0 {
 				pendingMessages = steeringAfterTools
@@ -303,10 +309,10 @@ func (a *Agent) executeSingleTool(
 		return tools.ErrorResult(fmt.Errorf("tool %q not found", tc.Name)), true
 	}
 
-	// Validate params against schema (basic JSON unmarshal check)
-	params, err := coerceParams(tc.Arguments, tool.Definition().Parameters)
+	// Validate and coerce params against the tool's JSON Schema.
+	params, err := tools.ValidateAndCoerce(tool, tc.Arguments)
 	if err != nil {
-		return tools.ErrorResult(fmt.Errorf("invalid params for %q: %w", tc.Name, err)), true
+		return tools.ErrorResult(err), true
 	}
 
 	onUpdate := func(partial tools.Result) {
@@ -324,14 +330,6 @@ func (a *Agent) executeSingleTool(
 		return tools.ErrorResult(err), true
 	}
 	return result, false
-}
-
-// coerceParams validates and normalises tool arguments against the JSON Schema.
-// Currently does a round-trip through JSON to catch obvious type mismatches.
-func coerceParams(args map[string]any, _ json.RawMessage) (map[string]any, error) {
-	// Simple pass-through for now; schema validation can be added with a JSON
-	// Schema library if desired.
-	return args, nil
 }
 
 // defaultConvertToLLM filters to the three message types LLMs understand.

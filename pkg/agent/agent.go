@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nickcecere/agent/pkg/ai"
+	"github.com/nickcecere/agent/pkg/session"
 	"github.com/nickcecere/agent/pkg/tools"
 )
 
@@ -25,9 +26,6 @@ type Agent struct {
 	pendingCalls map[string]bool
 	err          string
 
-	// session baseline: messages at last Prompt() start
-	sessionBase int
-
 	listeners   map[int]func(Event)
 	listenerSeq int
 	listenerMu  sync.RWMutex
@@ -39,14 +37,27 @@ type Agent struct {
 	steeringMu     sync.Mutex
 	followUpQueue  []ai.Message
 	followUpMu     sync.Mutex
+
+	// Session persistence (optional).
+	sess *session.Session
+	// entryIDs maps message index → session entry ID, used for compaction.
+	entryIDs []string
+
+	// Compaction config.
+	compactionCfg   CompactionConfig
+	prevSummary     string // accumulated summary from previous compactions
+	streamOpts      ai.StreamOptions
 }
 
 // Options configures a new Agent.
 type Options struct {
-	SystemPrompt string
-	Model        string
-	Provider     ai.Provider
-	Tools        *tools.Registry // nil → empty registry
+	SystemPrompt  string
+	Model         string
+	Provider      ai.Provider
+	Tools         *tools.Registry  // nil → empty registry
+	Session       *session.Session // optional: persist conversation to file
+	Compaction    CompactionConfig // optional: auto-compact when context grows
+	StreamOptions ai.StreamOptions // passed to every LLM call
 }
 
 // New creates a new Agent.
@@ -55,14 +66,37 @@ func New(opts Options) *Agent {
 	if reg == nil {
 		reg = tools.NewRegistry()
 	}
-	return &Agent{
-		systemPrompt: opts.SystemPrompt,
-		model:        opts.Model,
-		provider:     opts.Provider,
-		tools:        reg,
-		pendingCalls: make(map[string]bool),
-		listeners:    make(map[int]func(Event)),
+	a := &Agent{
+		systemPrompt:  opts.SystemPrompt,
+		model:         opts.Model,
+		provider:      opts.Provider,
+		tools:         reg,
+		pendingCalls:  make(map[string]bool),
+		listeners:     make(map[int]func(Event)),
+		sess:          opts.Session,
+		compactionCfg: opts.Compaction,
+		streamOpts:    opts.StreamOptions,
 	}
+	return a
+}
+
+// SetSession attaches a session for persistence. Existing session entries are
+// NOT replayed; use session.ParseMessages before creating the agent to resume.
+func (a *Agent) SetSession(s *session.Session) {
+	a.mu.Lock()
+	a.sess = s
+	a.mu.Unlock()
+}
+
+// AttachSession opens or creates a session and optionally loads its messages
+// into the agent's history. Call before first Prompt().
+func (a *Agent) AttachSession(s *session.Session, msgs []ai.Message) {
+	a.mu.Lock()
+	a.sess = s
+	// Build entryIDs slice (all zeros for pre-loaded messages).
+	a.entryIDs = make([]string, len(msgs))
+	a.messages = msgs
+	a.mu.Unlock()
 }
 
 // ---------------------------------------------------------------------------
@@ -242,14 +276,16 @@ func (a *Agent) State() State {
 	for k, v := range a.pendingCalls {
 		pending[k] = v
 	}
+	usage := EstimateContextTokens(msgs)
 	return State{
-		SystemPrompt:    a.systemPrompt,
-		Model:           a.model,
-		Provider:        a.provider.Name(),
-		Messages:        msgs,
-		IsStreaming:     a.isStreaming,
-		PendingToolCalls: pending,
-		Error:           a.err,
+		SystemPrompt:     a.systemPrompt,
+		Model:            a.model,
+		Provider:         a.provider.Name(),
+		Messages:         msgs,
+		IsStreaming:       a.isStreaming,
+		PendingToolCalls:  pending,
+		Error:            a.err,
+		ContextTokens:    usage.Tokens,
 	}
 }
 
@@ -270,9 +306,103 @@ func (a *Agent) ClearMessages() {
 // ---------------------------------------------------------------------------
 
 func (a *Agent) appendMsg(m ai.Message) {
+	// Normalise: dereference pointer types so all stored messages are values.
+	// Providers (e.g. streaming loop) return *AssistantMessage.
+	m = derefMessage(m)
 	a.mu.Lock()
 	a.messages = append(a.messages, m)
+	var entryID string
+	if a.sess != nil {
+		var err error
+		entryID, err = a.sess.AppendMessage(m)
+		if err != nil {
+			// Non-fatal: log to stderr but don't fail the agent.
+			fmt.Printf("session: write error: %v\n", err)
+		}
+	}
+	a.entryIDs = append(a.entryIDs, entryID)
 	a.mu.Unlock()
+}
+
+// maybeCompact checks whether compaction should run and, if so, replaces the
+// message history with a summary + kept messages. It records the compaction
+// entry in the session file.
+func (a *Agent) maybeCompact(ctx context.Context) error {
+	if !a.compactionCfg.Enabled || a.compactionCfg.ContextWindow <= 0 {
+		return nil
+	}
+
+	a.mu.RLock()
+	msgs := make([]ai.Message, len(a.messages))
+	copy(msgs, a.messages)
+	entryIDs := make([]string, len(a.entryIDs))
+	copy(entryIDs, a.entryIDs)
+	prevSummary := a.prevSummary
+	a.mu.RUnlock()
+
+	usage := EstimateContextTokens(msgs)
+	if !ShouldCompact(usage.Tokens, a.compactionCfg) {
+		return nil
+	}
+
+	result, err := runCompaction(ctx, a.provider, a.model, a.streamOpts, msgs, a.compactionCfg, prevSummary)
+	if err != nil {
+		return fmt.Errorf("compaction: %w", err)
+	}
+	if result == nil {
+		return nil // nothing compacted
+	}
+
+	// Find the session entry ID of the first kept message.
+	cutIdx := len(result.summarisedMessages)
+	firstKeptEntryID := ""
+	if a.sess != nil && cutIdx < len(entryIDs) {
+		firstKeptEntryID = entryIDs[cutIdx]
+	}
+
+	// Record compaction in session.
+	if a.sess != nil {
+		if err := a.sess.AppendCompaction(result.summary, firstKeptEntryID, result.tokensBefore); err != nil {
+			fmt.Printf("session: compaction write error: %v\n", err)
+		}
+	}
+
+	// Rebuild entryIDs for the new message list:
+	// [1 empty ID for summary, kept IDs...]
+	newEntryIDs := make([]string, 1+len(result.keptMessages))
+	copy(newEntryIDs[1:], entryIDs[cutIdx:cutIdx+len(result.keptMessages)])
+
+	a.mu.Lock()
+	a.messages = result.newMessages
+	a.entryIDs = newEntryIDs
+	a.prevSummary = result.summary
+	a.mu.Unlock()
+
+	a.broadcast(Event{Type: EventCompaction, Compaction: &CompactionEvent{
+		Summary:          result.summary,
+		MessagesRemoved:  len(result.summarisedMessages),
+		MessagesKept:     len(result.keptMessages),
+		TokensBefore:     result.tokensBefore,
+		TokensAfter:      EstimateContextTokens(result.newMessages).Tokens,
+	}})
+
+	return nil
+}
+
+// derefMessage unwraps pointer message types to their value form.
+// All concrete types (UserMessage, AssistantMessage, ToolResultMessage) define
+// GetRole on value receivers, so both *T and T implement ai.Message. We
+// normalise to values to keep type assertions simple throughout the codebase.
+func derefMessage(m ai.Message) ai.Message {
+	switch p := m.(type) {
+	case *ai.UserMessage:
+		return *p
+	case *ai.AssistantMessage:
+		return *p
+	case *ai.ToolResultMessage:
+		return *p
+	}
+	return m
 }
 
 func (a *Agent) snapshotMessages() []ai.Message {

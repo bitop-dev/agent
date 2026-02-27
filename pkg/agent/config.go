@@ -33,8 +33,47 @@ type FileConfig struct {
 	// Temperature controls randomness (nil = provider default).
 	Temperature *float64 `yaml:"temperature"`
 
+	// ThinkingLevel controls extended reasoning for models that support it.
+	// Values: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
+	// Empty string = use provider default (no thinking block sent).
+	ThinkingLevel string `yaml:"thinking_level"`
+
+	// CacheRetention controls prompt caching aggressiveness (Anthropic, etc.)
+	// Values: "none" | "short" | "long". Default: "short" (caching enabled).
+	CacheRetention string `yaml:"cache_retention"`
+
+	// APIVersion is used by Azure OpenAI (e.g. "2024-12-01-preview").
+	APIVersion string `yaml:"api_version"`
+
+	// Region is used by Amazon Bedrock (e.g. "us-east-1").
+	// Defaults to AWS_DEFAULT_REGION / ~/.aws/config.
+	Region string `yaml:"region"`
+
+	// Profile is the AWS profile name for Bedrock authentication.
+	Profile string `yaml:"profile"`
+
+	// MaxTurns caps the number of LLM calls per prompt (0 = unlimited).
+	// Prevents runaway loops where the model keeps calling tools indefinitely.
+	// Recommended: 50 for general use, 200 for long research tasks.
+	MaxTurns int `yaml:"max_turns"`
+
+	// ContextWindow is the model's context window in tokens. Used for compaction
+	// and overflow detection. (e.g. 200000 for claude-3-7-sonnet-20250219)
+	ContextWindow int `yaml:"context_window"`
+
+	// Compaction controls automatic context compaction.
+	Compaction CompactionFileConfig `yaml:"compaction"`
+
 	// Tools configures built-in and plugin tools.
 	Tools ToolsConfig `yaml:"tools"`
+}
+
+// CompactionFileConfig mirrors CompactionConfig but uses YAML tags.
+type CompactionFileConfig struct {
+	Enabled          bool `yaml:"enabled"`
+	ContextWindow    int  `yaml:"context_window"`
+	ReserveTokens    int  `yaml:"reserve_tokens"`
+	KeepRecentTokens int  `yaml:"keep_recent_tokens"`
 }
 
 // ToolsConfig controls which built-in tools are registered and which plugin
