@@ -54,7 +54,7 @@ type grepMatch struct {
 	line    string // raw line content
 }
 
-func (t *GrepTool) Execute(ctx context.Context, _ string, params map[string]any, _ tools.UpdateFn) (tools.Result, error) {
+func (t *GrepTool) Execute(ctx context.Context, _ string, params map[string]any, onUpdate tools.UpdateFn) (tools.Result, error) {
 	pattern, _ := params["pattern"].(string)
 	if pattern == "" {
 		return tools.ErrorResult(fmt.Errorf("pattern is required")), nil
@@ -118,6 +118,8 @@ func (t *GrepTool) Execute(ctx context.Context, _ string, params map[string]any,
 	linesTruncated := false
 	matchLimitReached := false
 
+	filesSearched := 0
+
 	if !info.IsDir() {
 		// Single file search
 		rel, _ := filepath.Rel(t.cwd, searchRoot)
@@ -177,6 +179,16 @@ func (t *GrepTool) Execute(ctx context.Context, _ string, params map[string]any,
 			matches = append(matches, ms...)
 			if lt {
 				linesTruncated = true
+			}
+			filesSearched++
+			// Emit progress every 100 files.
+			if onUpdate != nil && filesSearched%100 == 0 {
+				onUpdate(tools.Result{
+					Content: []ai.ContentBlock{ai.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Searching… %d files scanned, %d matches so far", filesSearched, len(matches)),
+					}},
+				})
 			}
 			if len(matches) >= limit {
 				matchLimitReached = true

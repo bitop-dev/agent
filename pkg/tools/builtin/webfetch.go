@@ -36,7 +36,7 @@ func (t *WebFetchTool) Definition() ai.ToolDefinition {
 	}
 }
 
-func (t *WebFetchTool) Execute(ctx context.Context, _ string, params map[string]any, _ tools.UpdateFn) (tools.Result, error) {
+func (t *WebFetchTool) Execute(ctx context.Context, _ string, params map[string]any, onUpdate tools.UpdateFn) (tools.Result, error) {
 	rawURL, _ := params["url"].(string)
 	if rawURL == "" {
 		return tools.ErrorResult(fmt.Errorf("url is required")), nil
@@ -56,6 +56,12 @@ func (t *WebFetchTool) Execute(ctx context.Context, _ string, params map[string]
 	}
 	if maxBytes > 102400 {
 		maxBytes = 102400
+	}
+
+	if onUpdate != nil {
+		onUpdate(tools.Result{
+			Content: []ai.ContentBlock{ai.TextContent{Type: "text", Text: fmt.Sprintf("Fetching %s…", rawURL)}},
+		})
 	}
 
 	content, finalURL, err := fetchPage(ctx, rawURL, maxBytes)

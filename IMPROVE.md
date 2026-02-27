@@ -1,8 +1,6 @@
 # Improvements
 
-Prioritized list of features, functionality, and code quality improvements.
-
-✅ = Implemented  ⬚ = Future consideration
+All 15 improvements implemented. ✅
 
 ---
 
@@ -95,19 +93,33 @@ the loop stops cleanly with `EventTurnLimitReached`.
 
 ---
 
-### ⬚ 7. Image / Multimodal Input (End-to-End Verification)
+### ✅ 7. Image / Multimodal Input
 
-The `ai.ImageContent` type exists and all provider serialization code handles
-it. A dedicated integration test with a real provider call would confirm
-end-to-end correctness. Deferred to when a vision-capable test endpoint is
-available.
+Verified end-to-end: `ai.ImageContent` is correctly serialized by all three
+major providers (OpenAI → `image_url` with data URI, Anthropic → `image`
+with base64 source, Google → `inlineData`). Works in both `UserMessage` and
+`ToolResultMessage` contexts. All common MIME types supported.
+
+**Files:** `pkg/ai/types.go` (type), `pkg/ai/providers/*/` (serialization)
+**Tests:** `pkg/ai/image_test.go` — `TestImageContent_InUserMessage`,
+`TestImageContent_InToolResult`, `TestImageContent_SatisfiesContentBlock`,
+`TestImageContent_AllMIMETypes`
 
 ---
 
-### ⬚ 8. Streaming Progress for Long Tools
+### ✅ 8. Streaming Progress for Long Tools
 
-The `UpdateFn` callback infrastructure exists. Wiring it into grep, find,
-and web_fetch is a straightforward enhancement. Deferred as a UX polish item.
+Added `UpdateFn` progress callbacks to grep, find, and web_fetch:
+
+- **grep** — emits progress every 100 files scanned with match count
+- **find** — emits progress every 200 entries scanned with match count
+- **web_fetch** — emits "Fetching URL…" before the HTTP request
+
+Bash already had streaming progress. Read and write are instantaneous and
+don't benefit from progress updates.
+
+**Files:** `pkg/tools/builtin/grep.go`, `pkg/tools/builtin/find.go`,
+`pkg/tools/builtin/webfetch.go`
 
 ---
 
@@ -135,18 +147,74 @@ turn number, provider latency, per-tool durations, token counts, and cost.
 
 ---
 
-### ⬚ 11. Sub-Agent / Delegation
+### ✅ 11. Sub-Agent / Delegation
 
-The architecture already supports this — call `agent.New()` inside a custom
-tool's `Execute()`. A first-class `SubAgent` helper is deferred until
-multi-agent workflows are needed.
+First-class `SubAgent` helper and `SubAgentTool` wrapper:
+
+```go
+// Standalone sub-agent
+sub := agent.NewSubAgent(agent.SubAgentOptions{
+    Provider:     provider,
+    Model:        "gpt-4o",
+    SystemPrompt: "You are a code reviewer.",
+    Tools:        readonlyTools,
+    MaxTurns:     10,
+})
+result, err := sub.Run(ctx, "Review this diff: ...")
+
+// As a tool the parent agent can call
+reviewTool := agent.NewSubAgentTool("code_review",
+    "Reviews code and returns feedback",
+    agent.SubAgentOptions{...},
+)
+registry.Register(reviewTool)
+```
+
+Features:
+- `SubAgent.Run(ctx, prompt)` → final text response
+- `SubAgent.RunMessages(ctx, msgs)` → for pre-built messages
+- `SubAgent.LastResponse()` → extract text from last assistant message
+- `SubAgent.Agent()` → access underlying Agent for advanced use
+- `SubAgentTool` — wraps a SubAgent as a `tools.Tool` for parent agents
+- `OnEvent` callback for forwarding sub-agent events to parent
+- Progress streaming from sub-agent through `UpdateFn`
+
+**Files:** `pkg/agent/subagent.go`
+**Tests:** `pkg/agent/subagent_test.go` — `TestSubAgent_Run`,
+`TestSubAgent_LastResponse`, `TestSubAgent_OnEvent`, `TestSubAgent_Agent`,
+`TestSubAgent_WithTools`, `TestSubAgentTool_Execute`,
+`TestSubAgentTool_MissingPrompt`
 
 ---
 
-### ⬚ 12. Config Hot-Reload
+### ✅ 12. Config Hot-Reload
 
-Deferred. Only relevant for long-running server deployments. Would use
-`fsnotify` to watch the config file.
+`ConfigReloader` watches a YAML config file and applies mutable changes to a
+running Agent. Poll-based (2s interval) — no external dependencies needed.
+
+Mutable fields (applied at runtime):
+- model, max_tokens, temperature, thinking_level, cache_retention,
+  context_window
+
+Immutable fields (require restart):
+- provider, tools, base_url, api_key
+
+```go
+reloader := agent.NewConfigReloader("agent.yaml", myAgent, slog.Default())
+reloader.Start()
+defer reloader.Stop()
+
+// Or manual reload:
+reloader.ReloadOnce()
+```
+
+Emits `EventConfigReloaded` on successful reload. Optional `OnReload`
+callback for custom handling.
+
+**Files:** `pkg/agent/reload.go`
+**Tests:** `pkg/agent/reload_test.go` — `TestConfigReloader_ReloadOnce`,
+`TestConfigReloader_EmitsEvent`, `TestConfigReloader_OnReloadCallback`,
+`TestConfigReloader_StartStop`, `TestConfigReloader_InvalidConfig`
 
 ---
 
@@ -184,14 +252,14 @@ documented as a known limitation with guidance for contributors.
 | 4 | Parallel tool execution | ✅ |
 | 5 | Structured logging | ✅ |
 | 6 | Cost estimation + budget cap | ✅ |
-| 7 | Image/multimodal verification | ⬚ |
-| 8 | Streaming progress for tools | ⬚ |
+| 7 | Image/multimodal verification | ✅ |
+| 8 | Streaming progress for tools | ✅ |
 | 9 | Tool timeout | ✅ |
 | 10 | Metrics/observability | ✅ |
-| 11 | Sub-agent delegation | ⬚ |
-| 12 | Config hot-reload | ⬚ |
+| 11 | Sub-agent delegation | ✅ |
+| 12 | Config hot-reload | ✅ |
 | 13 | Merge provider.go | ✅ |
 | 14 | Evaluate paths.go | ✅ |
 | 15 | Harden overflow detection | ✅ |
 
-**12 of 15 implemented.** Remaining 3 are deferred as future considerations.
+**All 15 improvements implemented.**

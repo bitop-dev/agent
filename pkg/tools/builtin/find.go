@@ -41,7 +41,7 @@ func (t *FindTool) Definition() ai.ToolDefinition {
 	}
 }
 
-func (t *FindTool) Execute(ctx context.Context, _ string, params map[string]any, _ tools.UpdateFn) (tools.Result, error) {
+func (t *FindTool) Execute(ctx context.Context, _ string, params map[string]any, onUpdate tools.UpdateFn) (tools.Result, error) {
 	pattern, _ := params["pattern"].(string)
 	if pattern == "" {
 		return tools.ErrorResult(fmt.Errorf("pattern is required")), nil
@@ -76,6 +76,7 @@ func (t *FindTool) Execute(ctx context.Context, _ string, params map[string]any,
 
 	var results []string
 	limitReached := false
+	entriesScanned := 0
 
 	walkErr := filepath.WalkDir(searchRoot, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || ctx.Err() != nil {
@@ -105,6 +106,16 @@ func (t *FindTool) Execute(ctx context.Context, _ string, params map[string]any,
 		}
 
 		results = append(results, relSlash)
+		entriesScanned++
+		// Emit progress every 200 entries.
+		if onUpdate != nil && entriesScanned%200 == 0 {
+			onUpdate(tools.Result{
+				Content: []ai.ContentBlock{ai.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Searching… %d entries scanned, %d matches so far", entriesScanned, len(results)),
+				}},
+			})
+		}
 		if len(results) >= limit {
 			limitReached = true
 			return fmt.Errorf("limit_reached")
