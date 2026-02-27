@@ -1,0 +1,8 @@
+[package]
+name = "file_info"
+version = "0.1.0"
+edition = "2021"
+description = "file_info — agent plugin tool written in Rust"
+
+# Zero external dependencies — pure stdlib only.
+[dependencies]

@@ -9,6 +9,10 @@ There are three categories:
 2. **Plugin tools** — external executables communicating over JSON/stdin/stdout
 3. **Compiled-in custom tools** — Go types implementing `tools.Tool`, registered in code
 
+For a comprehensive guide to writing your own tools (both compiled-in and plugins,
+with examples in Python, TypeScript, Rust, Bash, and Ruby) see
+[custom-tools.md](custom-tools.md).
+
 ---
 
 ## Built-in Tool Presets
@@ -255,20 +259,23 @@ The default limits are:
 - **50 KB** (51,200 bytes)
 - **2000 lines**
 
-Whichever is hit first. When output is truncated, a note is appended:
+Whichever is hit first. When output is truncated, a notice is appended to the
+result, for example:
 
 ```
-[Output truncated at 50KB. Full output saved to: /tmp/agent-out-abc123.txt]
+[50KB limit reached. Use offset/limit parameters to read further.]
 ```
 
-The `truncate` package provides these utilities for use in your own tools:
+The `builtin` package exposes helpers for use in your own tools:
 
 ```go
 import "github.com/nickcecere/agent/pkg/tools/builtin"
 
-result := builtin.TruncateHead(output, builtin.DefaultMaxBytes, builtin.DefaultMaxLines)
-result := builtin.TruncateTail(output, builtin.DefaultMaxBytes, builtin.DefaultMaxLines)
-size   := builtin.FormatSize(bytes)   // "50KB", "1.5MB"
+tr := builtin.TruncateHead(output, maxLines, maxBytes)
+// tr.Content   — truncated text
+// tr.Truncated — true if content was cut
+
+size := builtin.FormatSize(51200) // "50 KB"
 ```
 
 ---
@@ -276,6 +283,7 @@ size   := builtin.FormatSize(bytes)   // "50KB", "1.5MB"
 ## Writing a Compiled-In Tool
 
 Implement `tools.Tool` and register it with the agent's registry.
+See [custom-tools.md](custom-tools.md) for the full reference.
 
 ```go
 package mytools
@@ -289,9 +297,7 @@ import (
 )
 
 // WeatherTool fetches current weather for a city.
-type WeatherTool struct {
-    apiKey string
-}
+type WeatherTool struct{ apiKey string }
 
 func NewWeatherTool(apiKey string) *WeatherTool {
     return &WeatherTool{apiKey: apiKey}
@@ -303,15 +309,9 @@ func (t *WeatherTool) Definition() ai.ToolDefinition {
         Description: "Get the current weather for a city.",
         Parameters: tools.MustSchema(tools.SimpleSchema{
             Properties: map[string]tools.Property{
-                "city": {
-                    Type:        "string",
-                    Description: "City name, e.g. 'San Francisco'",
-                },
-                "units": {
-                    Type:        "string",
-                    Description: "Temperature units: 'celsius' or 'fahrenheit'",
-                    Enum:        []any{"celsius", "fahrenheit"},
-                },
+                "city":  {Type: "string", Description: "City name, e.g. 'Berlin'"},
+                "units": {Type: "string", Description: "celsius or fahrenheit",
+                          Enum: []any{"celsius", "fahrenheit"}},
             },
             Required: []string{"city"},
         }),
@@ -319,32 +319,23 @@ func (t *WeatherTool) Definition() ai.ToolDefinition {
 }
 
 func (t *WeatherTool) Execute(
-    ctx context.Context,
-    callID string,
-    params map[string]any,
-    onUpdate tools.UpdateFn,
+    ctx context.Context, _ string,
+    params map[string]any, onUpdate tools.UpdateFn,
 ) (tools.Result, error) {
     city, _ := params["city"].(string)
     units, _ := params["units"].(string)
     if units == "" {
         units = "celsius"
     }
-
-    // Stream a progress update while fetching
     if onUpdate != nil {
-        onUpdate(tools.TextResult(fmt.Sprintf("Fetching weather for %s...", city)))
+        onUpdate(tools.TextResult(fmt.Sprintf("Fetching weather for %s…", city)))
     }
-
-    // Fetch weather (pseudocode)
     temp, condition, err := fetchWeather(ctx, t.apiKey, city, units)
     if err != nil {
         return tools.ErrorResult(err), nil
     }
-
-    return tools.TextResult(fmt.Sprintf(
-        "Weather in %s: %d°%s, %s",
-        city, temp, unitSymbol(units), condition,
-    )), nil
+    return tools.TextResult(fmt.Sprintf("Weather in %s: %.1f° %s, %s",
+        city, temp, units, condition)), nil
 }
 ```
 
@@ -354,24 +345,42 @@ Register it with the agent:
 reg := tools.NewRegistry()
 reg.Register(mytools.NewWeatherTool(os.Getenv("WEATHER_API_KEY")))
 
-agent := agent.New(provider, "model", reg, systemPrompt)
+a := agent.New(agent.Options{
+    Provider: provider,
+    Model:    "claude-sonnet-4-5",
+    Tools:    reg,
+})
 ```
-
-See [sdk.md](sdk.md) for a full example.
 
 ---
 
 ## Writing a Plugin Tool
 
 Plugin tools are external executables that communicate with the agent over
-JSON-encoded messages on stdin/stdout. They can be written in any language.
+newline-delimited JSON on stdin/stdout. They can be written in any language.
 
-### Protocol
+See [custom-tools.md](custom-tools.md) for the full protocol spec and examples
+in Python, TypeScript, Rust, Bash, and Ruby.
 
-1. **Startup:** Agent starts your executable and writes a `{"type":"init","tools":[...]}` message. Your process reads this and responds with the tool schemas.
-2. **Execution:** Agent writes `{"type":"call","name":"...","call_id":"...","params":{...}}`. Your process executes and writes back `{"type":"result","call_id":"...","content":[...],"is_error":false}`.
+### Protocol (summary)
 
-### Go Plugin Example
+**Step 1 — describe** (once, at startup):
+
+```
+agent → plugin:  {"type":"describe"}
+plugin → agent:  {"name":"my_tool","description":"...","parameters":{...}}
+```
+
+**Step 2 — call** (once per tool invocation):
+
+```
+agent → plugin:  {"type":"call","call_id":"c1","params":{"input":"hello"}}
+plugin → agent:  {"content":[{"type":"text","text":"result"}],"error":false}
+```
+
+On error, set `"error": true` and put the message in `content`.
+
+### Minimal Go Example
 
 ```go
 package main
@@ -383,60 +392,34 @@ import (
     "os"
 )
 
-type inMsg struct {
-    Type   string          `json:"type"`
-    Tools  json.RawMessage `json:"tools,omitempty"`
-    Name   string          `json:"name,omitempty"`
-    CallID string          `json:"call_id,omitempty"`
-    Params map[string]any  `json:"params,omitempty"`
-}
-
-type outMsg struct {
-    Type    string `json:"type"`
-    CallID  string `json:"call_id,omitempty"`
-    Content []struct {
-        Type string `json:"type"`
-        Text string `json:"text"`
-    } `json:"content,omitempty"`
-    IsError bool             `json:"is_error,omitempty"`
-    Tools   []map[string]any `json:"tools,omitempty"`
-}
-
 func main() {
     scanner := bufio.NewScanner(os.Stdin)
     enc := json.NewEncoder(os.Stdout)
 
     for scanner.Scan() {
-        var msg inMsg
+        var msg map[string]any
         if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
             continue
         }
-        switch msg.Type {
-        case "init":
-            enc.Encode(outMsg{
-                Type: "init",
-                Tools: []map[string]any{{
-                    "name":        "my_plugin_tool",
-                    "description": "Does something useful.",
-                    "parameters": map[string]any{
-                        "type": "object",
-                        "properties": map[string]any{
-                            "input": map[string]any{"type": "string"},
-                        },
-                        "required": []string{"input"},
+        switch msg["type"] {
+        case "describe":
+            enc.Encode(map[string]any{
+                "name":        "echo",
+                "description": "Echoes the input back.",
+                "parameters": map[string]any{
+                    "type": "object",
+                    "properties": map[string]any{
+                        "input": map[string]any{"type": "string", "description": "Text to echo"},
                     },
-                }},
+                    "required": []string{"input"},
+                },
             })
         case "call":
-            input, _ := msg.Params["input"].(string)
-            result := fmt.Sprintf("Processed: %s", input)
-            enc.Encode(outMsg{
-                Type:   "result",
-                CallID: msg.CallID,
-                Content: []struct {
-                    Type string `json:"type"`
-                    Text string `json:"text"`
-                }{{Type: "text", Text: result}},
+            params := msg["params"].(map[string]any)
+            input, _ := params["input"].(string)
+            enc.Encode(map[string]any{
+                "content": []map[string]string{{"type": "text", "text": fmt.Sprintf("Echo: %s", input)}},
+                "error":   false,
             })
         }
     }
@@ -447,18 +430,16 @@ func main() {
 
 ```yaml
 tools:
-  preset: none    # or coding, etc.
+  preset: coding
   plugins:
-    - path: ./plugins/my-tool
+    - path: python3
+      args: ["./plugins/my_tool.py"]
+    - path: ./plugins/my_tool       # compiled binary
       args: []
-    - path: /usr/local/bin/my-plugin
-      args: ["--verbose"]
 ```
 
-The plugin process is started once at agent startup and kept alive for the
-session. Each tool call is a JSON round-trip over stdin/stdout.
-
-See `examples/tools/bash_tool/main.go` for a complete working plugin.
+The plugin process starts once and stays alive for the session.
+Each tool call is one JSON round-trip.
 
 ---
 

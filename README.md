@@ -369,7 +369,8 @@ ANTHROPIC_API_KEY=sk-... go run ./examples/confirmation
 | [docs/quickstart.md](docs/quickstart.md) | Install, first config, first run |
 | [docs/config.md](docs/config.md) | Complete configuration reference |
 | [docs/providers.md](docs/providers.md) | All providers with credentials |
-| [docs/tools.md](docs/tools.md) | Built-in tools + writing your own |
+| [docs/tools.md](docs/tools.md) | Built-in tools reference |
+| [docs/custom-tools.md](docs/custom-tools.md) | Writing compiled-in and plugin tools (Go, Python, TS, Rust, Bash, Ruby) |
 | [docs/session.md](docs/session.md) | Session format, JSONL, branching |
 | [docs/compaction.md](docs/compaction.md) | Context compaction |
 | [docs/skills.md](docs/skills.md) | Skills system |
