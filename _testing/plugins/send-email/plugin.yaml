@@ -1,0 +1,57 @@
+apiVersion: agent/v1
+kind: Plugin
+metadata:
+  name: send-email
+  version: 0.1.0
+  description: Email drafting and sending plugin example
+spec:
+  category: integration
+  runtime:
+    type: http
+  contributes:
+    tools:
+      - id: email/draft
+        path: tools/draft.yaml
+      - id: email/send
+        path: tools/send.yaml
+    prompts:
+      - id: email/style-default
+        path: prompts/style-default.md
+    profileTemplates:
+      - id: email/assistant
+        path: profiles/email-assistant.yaml
+    policies:
+      - id: email/default
+        path: policies/default.yaml
+  configSchema:
+    type: object
+    properties:
+      baseURL:
+        type: string
+      provider:
+        type: string
+        enum: [smtp, resend, sendgrid]
+      smtpHost:
+        type: string
+      smtpPort:
+        type: integer
+      username:
+        type: string
+      password:
+        type: string
+        secret: true
+      from:
+        type: string
+    required:
+      - baseURL
+      - provider
+  permissions:
+    network:
+      outbound:
+        - smtp
+        - https
+    sensitiveActions:
+      - email/send
+  requires:
+    framework: ">=0.1.0"
+    plugins: []

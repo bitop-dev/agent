@@ -1,0 +1,29 @@
+apiVersion: agent/v1
+kind: Profile
+metadata:
+  name: email-openai-no-approval
+  version: 0.1.0
+  description: OpenAI-backed email profile that explicitly allows email/send without approval via policy override
+spec:
+  instructions:
+    system:
+      - ./prompts/system.md
+  provider:
+    default: openai
+    model: nemotron-3-super-120b-a12b
+  tools:
+    enabled:
+      - email/draft
+      - email/send
+  approval:
+    mode: never
+    requireFor: []
+  workspace:
+    required: false
+    writeScope: read-only
+  session:
+    persistence: sqlite
+    compaction: auto
+  policy:
+    overlays:
+      - ./policy/allow-send.yaml

@@ -1,0 +1,15 @@
+id: core/bash
+kind: tool
+description: Run a shell command subject to policy and approval
+inputSchema:
+  type: object
+  properties:
+    command:
+      type: string
+  required:
+    - command
+execution:
+  mode: host
+  operation: bash
+risk:
+  level: high

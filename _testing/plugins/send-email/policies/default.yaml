@@ -1,0 +1,6 @@
+version: 1
+rules:
+  - id: require-approval-email-send
+    action: tool
+    tool: email/send
+    decision: require_approval

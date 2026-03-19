@@ -1,0 +1,15 @@
+id: core/read
+kind: tool
+description: Read a file from the local workspace
+inputSchema:
+  type: object
+  properties:
+    path:
+      type: string
+  required:
+    - path
+execution:
+  mode: host
+  operation: read
+risk:
+  level: low

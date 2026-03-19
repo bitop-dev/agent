@@ -1,0 +1,20 @@
+id: email/draft
+kind: tool
+description: Draft an email without sending it
+inputSchema:
+  type: object
+  properties:
+    to:
+      type: string
+    subject:
+      type: string
+    body:
+      type: string
+  required:
+    - to
+    - subject
+execution:
+  mode: http
+  operation: draft-email
+risk:
+  level: low

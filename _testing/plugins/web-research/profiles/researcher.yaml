@@ -1,0 +1,29 @@
+apiVersion: agent/v1
+kind: Profile
+metadata:
+  name: researcher-template
+  version: 0.1.0
+  description: Example profile template for web research
+spec:
+  instructions:
+    system:
+      - ./prompts/system.md
+  provider:
+    default: openai
+    model: nemotron-3-super-120b-a12b
+  tools:
+    enabled:
+      - web/search
+      - web/fetch
+  approval:
+    mode: never
+    requireFor: []
+  workspace:
+    required: false
+    writeScope: read-only
+  session:
+    persistence: sqlite
+    compaction: auto
+  policy:
+    overlays:
+      - ./policies/default.yaml

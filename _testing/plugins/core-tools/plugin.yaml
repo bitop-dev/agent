@@ -1,0 +1,37 @@
+apiVersion: agent/v1
+kind: Plugin
+metadata:
+  name: core-tools
+  version: 0.1.0
+  description: Core local file and shell tool bundle
+spec:
+  category: integration
+  runtime:
+    type: host
+  contributes:
+    tools:
+      - id: core/read
+        path: tools/read.yaml
+      - id: core/write
+        path: tools/write.yaml
+      - id: core/edit
+        path: tools/edit.yaml
+      - id: core/bash
+        path: tools/bash.yaml
+    prompts: []
+    profileTemplates:
+      - id: templates/coding
+        path: profiles/coding.yaml
+    policies: []
+  configSchema:
+    type: object
+    properties: {}
+    required: []
+  permissions:
+    sensitiveActions:
+      - core/write
+      - core/edit
+      - core/bash
+  requires:
+    framework: ">=0.1.0"
+    plugins: []

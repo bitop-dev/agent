@@ -1,0 +1,30 @@
+apiVersion: agent/v1
+kind: Profile
+metadata:
+  name: delegator-template
+  version: 0.1.0
+  description: Example profile template for bounded delegation
+spec:
+  instructions:
+    system:
+      - ./prompts/system.md
+  provider:
+    default: openai
+    model: nemotron-3-super-120b-a12b
+  tools:
+    enabled:
+      - core/read
+      - agent/spawn
+  approval:
+    mode: on-request
+    requireFor:
+      - agent/spawn
+  workspace:
+    required: true
+    writeScope: read-only
+  session:
+    persistence: sqlite
+    compaction: auto
+  policy:
+    overlays:
+      - ./policies/default.yaml

@@ -1,0 +1,29 @@
+apiVersion: agent/v1
+kind: Profile
+metadata:
+  name: delegator
+  version: 0.1.0
+  description: Profile for delegating tasks to sub-agents via agent/spawn
+spec:
+  instructions:
+    system:
+      - ./prompts/system.md
+  provider:
+    default: openai
+    model: nemotron-3-super-120b-a12b
+  tools:
+    enabled:
+      - core/read
+      - agent/spawn
+  approval:
+    mode: on-request
+    requireFor:
+      - agent/spawn
+  workspace:
+    required: false
+    writeScope: read-only
+  session:
+    persistence: sqlite
+    compaction: auto
+  policy:
+    overlays: []

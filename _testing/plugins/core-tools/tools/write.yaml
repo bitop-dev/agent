@@ -1,0 +1,18 @@
+id: core/write
+kind: tool
+description: Write a file inside the local workspace
+inputSchema:
+  type: object
+  properties:
+    path:
+      type: string
+    content:
+      type: string
+  required:
+    - path
+    - content
+execution:
+  mode: host
+  operation: write
+risk:
+  level: medium

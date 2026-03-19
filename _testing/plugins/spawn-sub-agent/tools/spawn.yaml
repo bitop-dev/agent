@@ -1,0 +1,19 @@
+id: agent/spawn
+kind: tool
+description: Spawn a bounded sub-agent task using an allowed profile and tool set
+inputSchema:
+  type: object
+  properties:
+    task:
+      type: string
+    profile:
+      type: string
+    maxTurns:
+      type: integer
+  required:
+    - task
+execution:
+  mode: host
+  operation: spawn-sub-agent
+risk:
+  level: high

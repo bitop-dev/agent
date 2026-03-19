@@ -1,0 +1,6 @@
+version: 1
+rules:
+  - id: require-approval-agent-spawn
+    action: tool
+    tool: agent/spawn
+    decision: require_approval

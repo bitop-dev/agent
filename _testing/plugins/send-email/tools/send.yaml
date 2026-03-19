@@ -1,0 +1,21 @@
+id: email/send
+kind: tool
+description: Send an email through a configured provider
+inputSchema:
+  type: object
+  properties:
+    to:
+      type: string
+    subject:
+      type: string
+    body:
+      type: string
+  required:
+    - to
+    - subject
+    - body
+execution:
+  mode: http
+  operation: send-email
+risk:
+  level: high

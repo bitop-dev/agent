@@ -1,0 +1,30 @@
+apiVersion: agent/v1
+kind: Profile
+metadata:
+  name: email-assistant-template
+  version: 0.1.0
+  description: Example profile template for email tasks
+spec:
+  instructions:
+    system:
+      - ./prompts/system.md
+  provider:
+    default: openai
+    model: nemotron-3-super-120b-a12b
+  tools:
+    enabled:
+      - email/draft
+      - email/send
+  approval:
+    mode: on-request
+    requireFor:
+      - email/send
+  workspace:
+    required: false
+    writeScope: read-only
+  session:
+    persistence: sqlite
+    compaction: auto
+  policy:
+    overlays:
+      - ./policies/default.yaml

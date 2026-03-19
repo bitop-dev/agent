@@ -1,0 +1,17 @@
+id: web/search
+kind: tool
+description: Search the web using a configured provider
+inputSchema:
+  type: object
+  properties:
+    query:
+      type: string
+    topK:
+      type: integer
+  required:
+    - query
+execution:
+  mode: http
+  operation: web-search
+risk:
+  level: low

@@ -1,0 +1,42 @@
+apiVersion: agent/v1
+kind: Plugin
+metadata:
+  name: spawn-sub-agent
+  version: 0.1.0
+  description: Privileged orchestration plugin example for spawning sub-agents
+spec:
+  category: orchestration
+  runtime:
+    type: host
+  contributes:
+    tools:
+      - id: agent/spawn
+        path: tools/spawn.yaml
+    prompts:
+      - id: agent/delegation-guidance
+        path: prompts/delegation.md
+    profileTemplates:
+      - id: agent/delegator
+        path: profiles/delegator.yaml
+    policies:
+      - id: agent/spawn-guardrails
+        path: policies/default.yaml
+    hostCapabilities:
+      - id: host/sub-run
+        path: host/sub-run.yaml
+  configSchema:
+    type: object
+    properties:
+      maxDepth:
+        type: integer
+      maxAgents:
+        type: integer
+    required: []
+  permissions:
+    sensitiveActions:
+      - agent/spawn
+    hostCapabilities:
+      - sub-run
+  requires:
+    framework: ">=0.1.0"
+    plugins: []

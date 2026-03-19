@@ -1,0 +1,29 @@
+apiVersion: agent/v1
+kind: Profile
+metadata:
+  name: coding-template
+  version: 0.1.0
+  description: Template profile reference from the core tools plugin
+spec:
+  instructions:
+    system:
+      - ./prompts/system.md
+  provider:
+    default: mock
+    model: echo
+  tools:
+    enabled:
+      - core/read
+      - core/write
+      - core/edit
+  approval:
+    mode: on-request
+    requireFor: []
+  workspace:
+    required: true
+    writeScope: workspace
+  session:
+    persistence: sqlite
+    compaction: auto
+  policy:
+    overlays: []
