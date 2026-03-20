@@ -320,11 +320,97 @@ func runProfiles(ctx context.Context, app service.App, args []string) error {
 			fmt.Printf("%s\t%s\t%s\n", p.Manifest.Metadata.Name, p.Manifest.Metadata.Version, p.Reference.Path)
 		}
 		return nil
+	case "search":
+		query := ""
+		sourceFilter := ""
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--source":
+				i++
+				if i >= len(args) {
+					return errors.New("--source requires a value")
+				}
+				sourceFilter = args[i]
+			default:
+				if query == "" {
+					query = args[i]
+				} else {
+					query += " " + args[i]
+				}
+			}
+		}
+		sources := app.Config.PluginSources
+		if sourceFilter != "" {
+			filtered := make([]config.PluginSource, 0, len(sources))
+			for _, s := range sources {
+				if s.Name == sourceFilter {
+					filtered = append(filtered, s)
+				}
+			}
+			if len(filtered) == 0 {
+				return fmt.Errorf("no source named %q", sourceFilter)
+			}
+			sources = filtered
+		}
+		matches, err := internalplugin.SearchRegistryProfiles(query, sources)
+		if err != nil {
+			return err
+		}
+		if len(matches) == 0 {
+			fmt.Println("no profiles found")
+			return nil
+		}
+		for _, m := range matches {
+			fmt.Printf("%s\t%s\t%s\t%s\n", m.Name, m.Version, m.Source.Name, m.Description)
+		}
+		return nil
 	case "install":
 		if len(args) < 2 {
-			return errors.New("profiles install requires a source path")
+			return errors.New("profiles install requires a source path or profile name")
 		}
-		source := args[1]
+		// Check for --source flag indicating a registry install.
+		sourceFilter := ""
+		nameOrPath := ""
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--source":
+				i++
+				if i >= len(args) {
+					return errors.New("--source requires a value")
+				}
+				sourceFilter = args[i]
+			default:
+				nameOrPath = args[i]
+			}
+		}
+		if nameOrPath == "" {
+			return errors.New("profiles install requires a source path or profile name")
+		}
+		// If --source is given, or the argument doesn't look like a path, try registry.
+		isPath := strings.HasPrefix(nameOrPath, "/") || strings.HasPrefix(nameOrPath, "./") || strings.HasPrefix(nameOrPath, "../")
+		if sourceFilter != "" || !isPath {
+			sources := app.Config.PluginSources
+			if sourceFilter != "" {
+				filtered := make([]config.PluginSource, 0, len(sources))
+				for _, s := range sources {
+					if s.Name == sourceFilter {
+						filtered = append(filtered, s)
+					}
+				}
+				if len(filtered) == 0 {
+					return fmt.Errorf("no source named %q", sourceFilter)
+				}
+				sources = filtered
+			}
+			destDir, err := internalplugin.InstallProfileFromRegistry(nameOrPath, sources, app.Paths.UserProfilesDir)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("installed-profile\t%s\t%s\n", nameOrPath, destDir)
+			return nil
+		}
+		// Local path install (existing behaviour).
+		source := nameOrPath
 		absSource, err := filepath.Abs(source)
 		if err != nil {
 			return err
@@ -424,10 +510,37 @@ func runPlugins(ctx context.Context, app service.App, args []string) error {
 		return nil
 	case "search":
 		query := ""
-		if len(args) > 1 {
-			query = strings.Join(args[1:], " ")
+		sourceFilter := ""
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--source":
+				i++
+				if i >= len(args) {
+					return errors.New("--source requires a value")
+				}
+				sourceFilter = args[i]
+			default:
+				if query == "" {
+					query = args[i]
+				} else {
+					query += " " + args[i]
+				}
+			}
 		}
-		matches, err := internalplugin.SearchSources(query, app.Config.PluginSources)
+		sources := app.Config.PluginSources
+		if sourceFilter != "" {
+			filtered := make([]config.PluginSource, 0, len(sources))
+			for _, s := range sources {
+				if s.Name == sourceFilter {
+					filtered = append(filtered, s)
+				}
+			}
+			if len(filtered) == 0 {
+				return fmt.Errorf("no source named %q", sourceFilter)
+			}
+			sources = filtered
+		}
+		matches, err := internalplugin.SearchSources(query, sources)
 		if err != nil {
 			return err
 		}
@@ -1024,12 +1137,13 @@ func printUsage() {
 	fmt.Println("  chat                    Start an interactive session")
 	fmt.Println("  run                     Execute a one-shot run")
 	fmt.Println("  resume                  Resume a previous session with a new prompt")
-	fmt.Println("  profiles list           List discoverable profiles")
-	fmt.Println("  profiles install <path> Install a profile directory to ~/.agent/profiles/")
-	fmt.Println("  profiles show <ref>     Show one profile")
+	fmt.Println("  profiles list                               List discoverable profiles")
+	fmt.Println("  profiles search [query] [--source <name>]  Search registry for profile packages")
+	fmt.Println("  profiles install <name|path> [--source <name>]  Install from registry or local path")
+	fmt.Println("  profiles show <ref>                        Show one profile")
 	fmt.Println("  profiles validate <ref> Validate one profile")
 	fmt.Println("  plugins list            List discoverable plugins")
-	fmt.Println("  plugins search [query]  Search configured plugin sources")
+	fmt.Println("  plugins search [query] [--source <name>]  Search configured plugin sources")
 	fmt.Println("  plugins show <ref>      Show one plugin")
 	fmt.Println("  plugins validate <ref>  Validate one plugin")
 	fmt.Println("  plugins config <name>   Show one plugin config")

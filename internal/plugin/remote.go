@@ -19,6 +19,41 @@ import (
 	plg "github.com/bitop-dev/agent/pkg/plugin"
 )
 
+// ─── Profile registry types ────────────────────────────────────────────────
+
+type registryProfileIndex struct {
+	APIVersion  string               `json:"apiVersion"`
+	GeneratedAt string               `json:"generatedAt"`
+	Profiles    []registryProfileEntry `json:"profiles"`
+}
+
+type registryProfileEntry struct {
+	Name          string `json:"name"`
+	LatestVersion string `json:"latestVersion"`
+	Description   string `json:"description"`
+	Source        string `json:"source"`
+}
+
+type registryProfileMeta struct {
+	APIVersion  string                       `json:"apiVersion"`
+	Name        string                       `json:"name"`
+	Description string                       `json:"description"`
+	Versions    []registryProfileVersionEntry `json:"versions"`
+}
+
+type registryProfileVersionEntry struct {
+	Version  string           `json:"version"`
+	Artifact registryArtifact `json:"artifact"`
+}
+
+// ProfileSourceMatch pairs a registry source with a matched profile entry.
+type ProfileSourceMatch struct {
+	Source  config.PluginSource
+	Name    string
+	Version string
+	Description string
+}
+
 // ─── Registry response types ───────────────────────────────────────────────
 
 type registryIndex struct {
@@ -374,4 +409,90 @@ func extractTarGz(r io.Reader, destRoot string) error {
 		}
 	}
 	return nil
+}
+
+// ─── Profile registry functions ────────────────────────────────────────────
+
+// SearchRegistryProfiles fetches /v1/profiles/index.json from each enabled
+// registry source and returns entries matching query.
+func SearchRegistryProfiles(query string, sources []config.PluginSource) ([]ProfileSourceMatch, error) {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	var matches []ProfileSourceMatch
+	seen := map[string]struct{}{}
+	for _, source := range sources {
+		if !source.Enabled || source.Type != "registry" || strings.TrimSpace(source.URL) == "" {
+			continue
+		}
+		url := strings.TrimRight(source.URL, "/") + "/v1/profiles/index.json"
+		resp, err := registryHTTPClient.Get(url)
+		if err != nil {
+			return nil, fmt.Errorf("registry %s profiles: %w", source.URL, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("registry %s profiles: returned %d", source.URL, resp.StatusCode)
+		}
+		var idx registryProfileIndex
+		if err := json.NewDecoder(resp.Body).Decode(&idx); err != nil {
+			return nil, fmt.Errorf("registry %s profiles: decode: %w", source.URL, err)
+		}
+		for _, entry := range idx.Profiles {
+			if _, ok := seen[entry.Name]; ok {
+				continue
+			}
+			if needle != "" {
+				haystack := strings.ToLower(entry.Name + " " + entry.Description)
+				if !strings.Contains(haystack, needle) {
+					continue
+				}
+			}
+			seen[entry.Name] = struct{}{}
+			matches = append(matches, ProfileSourceMatch{
+				Source:      source,
+				Name:        entry.Name,
+				Version:     entry.LatestVersion,
+				Description: entry.Description,
+			})
+		}
+	}
+	return matches, nil
+}
+
+// InstallProfileFromRegistry downloads a profile package from a registry source
+// and extracts it into destinationRoot.
+func InstallProfileFromRegistry(name string, sources []config.PluginSource, destinationRoot string) (string, error) {
+	for _, source := range sources {
+		if !source.Enabled || source.Type != "registry" || strings.TrimSpace(source.URL) == "" {
+			continue
+		}
+		metaURL := strings.TrimRight(source.URL, "/") + "/v1/profiles/" + name + ".json"
+		resp, err := registryHTTPClient.Get(metaURL)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			continue
+		}
+		var meta registryProfileMeta
+		if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+			continue
+		}
+		if len(meta.Versions) == 0 {
+			continue
+		}
+		ver := meta.Versions[0]
+		if ver.Artifact.URL == "" {
+			return "", fmt.Errorf("registry profile %q has no artifact URL", name)
+		}
+		destDir, err := downloadAndExtract(ver.Artifact.URL, ver.Artifact.SHA256, destinationRoot)
+		if err != nil {
+			return "", err
+		}
+		return destDir, nil
+	}
+	return "", fmt.Errorf("profile %q not found in any configured registry source", name)
 }
