@@ -14,9 +14,12 @@ Patterns are ordered from simplest to most complex. Start with the first one and
 | [1. Single-tool agent](./01-single-tool-agent.md) | One plugin, one focused task | Wrapping a CLI, script, or API call |
 | [2. Research agent](./02-research-agent.md) | Search → fetch → synthesize | Any task requiring real web data |
 | [3. Research and action pipeline](./03-research-and-action-pipeline.md) | Research → produce output → deliver | News briefings, reports, notifications |
-| [4. Orchestrator with sub-agents](./04-orchestrator-sub-agents.md) | Parent delegates tasks to child agents | Parallel research, multi-step workflows |
+| [4. Orchestrator with sub-agents](./04-orchestrator-sub-agents.md) | Sequential + parallel delegation | Multi-topic research, complex workflows |
 | [5. Policy and approval patterns](./05-policy-and-approval-patterns.md) | Controlling what agents can do | Production deployments, sensitive tools |
 | [6. Prompt composition patterns](./06-prompt-composition.md) | Building effective system prompts | Any agent that needs consistent behavior |
+
+Pattern 4 now covers both sequential (`agent/spawn`) and parallel (`agent/spawn-parallel`)
+sub-agent execution, plus session compaction for long-running agents.
 
 ---
 

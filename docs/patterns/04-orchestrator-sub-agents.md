@@ -421,6 +421,125 @@ sub-agent cannot spawn further. This prevents runaway recursive delegation.
 
 ---
 
+## Parallel sub-agents
+
+For independent tasks, use `agent/spawn-parallel` instead of sequential `agent/spawn` calls.
+This runs all tasks concurrently using goroutines, cutting total runtime significantly.
+
+### Tool: `agent/spawn-parallel`
+
+```yaml
+tools:
+  enabled:
+    - agent/spawn-parallel
+    - email/send
+```
+
+### Usage in the system prompt
+
+```markdown
+Call agent/spawn-parallel with a tasks array:
+
+tasks:
+  - task: "Research OpenAI news. Return a structured summary."
+    profile: "researcher"
+    maxTurns: 8
+  - task: "Research Anthropic news. Return a structured summary."
+    profile: "researcher"
+    maxTurns: 8
+  - task: "Research Google DeepMind news. Return a structured summary."
+    profile: "researcher"
+    maxTurns: 8
+```
+
+### How it works
+
+All tasks execute concurrently. The framework:
+1. Spawns a goroutine per task
+2. Each runs its own full agent loop (profile, tools, model turns)
+3. Waits for all to finish
+4. Returns combined output with each task's result labelled
+
+```
+=== Task 1 (Research OpenAI news…) ===
+**Topic:** OpenAI
+**Key stories:** ...
+
+=== Task 2 (Research Anthropic news…) ===
+**Topic:** Anthropic
+**Key stories:** ...
+
+=== Task 3 (Research Google DeepMind news…) ===
+**Topic:** Google DeepMind
+**Key stories:** ...
+```
+
+### Error handling
+
+If one sub-agent fails, the others still complete. Errors are reported inline:
+
+```
+=== Task 2 (Research Anthropic…) — ERROR ===
+spawn-sub-agent: load profile "researcher": not found
+```
+
+The orchestrator receives all results and can decide how to proceed.
+
+### When to use parallel vs sequential
+
+| Use parallel when... | Use sequential when... |
+|---|---|
+| Tasks are independent | Task 2 depends on Task 1's output |
+| You want speed | You want to chain results |
+| Sub-agents don't share state | Sub-agents share a workspace |
+| Research across different topics | Multi-step workflow on one topic |
+
+### Example: 3-company news briefing with parallel research
+
+```yaml
+# orchestrator profile
+spec:
+  instructions:
+    system:
+      - |
+        Step 1: Call agent/spawn-parallel with three research tasks:
+          - OpenAI news
+          - Anthropic news
+          - Google DeepMind news
+        Use profile "researcher", maxTurns 8 for each.
+
+        Step 2: Combine the three summaries and call email/send.
+  tools:
+    enabled:
+      - agent/spawn-parallel
+      - email/send
+```
+
+This runs all three searches concurrently — total time is the duration of the
+slowest sub-agent, not the sum of all three.
+
+---
+
+## Session compaction
+
+When an agent session grows long (many tool calls, large tool results), the framework
+automatically compacts the transcript to free up context window space.
+
+Compaction is triggered when estimated context tokens exceed ~64k tokens.
+It follows [pi-mono's compaction design](https://github.com/badlogic/pi-mono):
+
+1. **Token-aware trigger** — not turn-count-based
+2. **Turn-boundary cuts** — never splits between a tool call and its result
+3. **Serialized conversation** — messages are converted to labeled text (`[User]:`,
+   `[Tool result]:`) before summarizing so the LLM doesn't treat it as a conversation
+4. **Structured summary format** — Goal, Constraints, Progress, Key Decisions, Next Steps
+5. **Session persistence** — compaction summaries are saved as session entries
+
+Compaction is enabled by default when `spec.session.compaction: auto` is set.
+The most recent ~20k tokens are always kept verbatim.
+
+---
+
 ## Related patterns
 
 - [Pattern 2: Research Agent](./02-research-agent.md) — the sub-agent profile used here

@@ -320,6 +320,55 @@ func runProfiles(ctx context.Context, app service.App, args []string) error {
 			fmt.Printf("%s\t%s\t%s\n", p.Manifest.Metadata.Name, p.Manifest.Metadata.Version, p.Reference.Path)
 		}
 		return nil
+	case "install":
+		if len(args) < 2 {
+			return errors.New("profiles install requires a source path")
+		}
+		source := args[1]
+		absSource, err := filepath.Abs(source)
+		if err != nil {
+			return err
+		}
+		// Validate the source has a profile.yaml
+		profilePath := filepath.Join(absSource, "profile.yaml")
+		if _, err := os.Stat(profilePath); err != nil {
+			return fmt.Errorf("no profile.yaml found in %s", absSource)
+		}
+		manifest, _, err := app.Profiles.Load(ctx, profilePath)
+		if err != nil {
+			return fmt.Errorf("invalid profile: %w", err)
+		}
+		destDir := filepath.Join(app.Paths.UserProfilesDir, manifest.Metadata.Name)
+		if _, err := os.Stat(destDir); err == nil {
+			return fmt.Errorf("profile %q already installed at %s", manifest.Metadata.Name, destDir)
+		}
+		if err := os.MkdirAll(app.Paths.UserProfilesDir, 0o755); err != nil {
+			return err
+		}
+		// Copy the entire profile directory
+		if err := filepath.WalkDir(absSource, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(absSource, path)
+			if err != nil {
+				return err
+			}
+			target := filepath.Join(destDir, rel)
+			if d.IsDir() {
+				return os.MkdirAll(target, 0o755)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(target, data, 0o644)
+		}); err != nil {
+			return fmt.Errorf("install profile: %w", err)
+		}
+		fmt.Printf("installed-profile\t%s\t%s\n", manifest.Metadata.Name, destDir)
+		return nil
+
 	case "show", "validate", "config", "validate-config":
 		if len(args) < 2 {
 			return fmt.Errorf("profiles %s requires a profile name or path", args[0])
@@ -976,6 +1025,7 @@ func printUsage() {
 	fmt.Println("  run                     Execute a one-shot run")
 	fmt.Println("  resume                  Resume a previous session with a new prompt")
 	fmt.Println("  profiles list           List discoverable profiles")
+	fmt.Println("  profiles install <path> Install a profile directory to ~/.agent/profiles/")
 	fmt.Println("  profiles show <ref>     Show one profile")
 	fmt.Println("  profiles validate <ref> Validate one profile")
 	fmt.Println("  plugins list            List discoverable plugins")

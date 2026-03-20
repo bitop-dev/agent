@@ -2,102 +2,138 @@
 
 `github.com/ncecere/agent` is a local-first Go agent framework with:
 
-- a generic runtime
-- loaded profiles
-- installable plugins
-- a small built-in core tool set: `read`, `write`, `edit`, `bash`, `glob`, `grep`
-- policy and approval gates
-- SQLite-backed sessions and resume
-- external integration paths through `http`, `host`, and `mcp` plugin runtimes
+- a generic runtime loop with tool call cycle
+- declarative profiles (agent definitions)
+- installable plugins with a registry ecosystem
+- built-in core tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`
+- policy and approval gates for sensitive actions
+- SQLite-backed sessions with resume and pi-mono-style compaction
+- sub-agent orchestration with sequential and parallel spawn
+- plugin runtimes: `http`, `command` (argv-template + JSON-stdin/stdout), `mcp`, `host`
+- tool name sanitisation for strict API backends (Bedrock, Azure)
 
 ## Status
 
-The current codebase is in a solid `v0.1` state:
+The framework is past `v0.1` with a working plugin registry, version tracking,
+upgrade/publish workflow, and a library of 14 tested plugins.
 
-- `go test ./...` passes
-- the core runtime, CLI, profiles, plugins, sessions, policy, and approvals all work together
-- OpenAI-compatible providers, separated plugin runtimes, sub-agent spawning, and MCP client support are implemented
+```bash
+go test ./...   # all tests pass
+go run ./cmd/agent doctor
+```
 
 ## Repository layout
 
-- `cmd/agent` - the core CLI host
-- `internal/` - runtime, services, providers, registries, persistence, policies
-- `pkg/` - public framework contracts
-- `docs/` - plans, workflow docs, examples, and bridge documentation
-- `_testing/` - repository-local profiles, plugins, runtimes, and fixtures for development/testing
+```
+cmd/agent/       CLI host
+internal/        runtime, services, providers, registries, persistence, policies
+pkg/             public framework contracts
+docs/            reference docs, patterns guide, examples
+_testing/        repository-local profiles, runtimes, and fixtures
+```
 
-The `_testing/` directory is not the core runtime. It exists to provide local examples and fixtures while developing the framework.
+Sibling repos:
+- `../agent-plugins` — 14 plugin packages (source of truth)
+- `../agent-registry` — HTTP registry server
 
 ## Quick start
 
-Run the CLI:
-
 ```bash
-go run ./cmd/agent
-```
+# Configure provider
+export OPENAI_BASE_URL=https://your-provider.com/v1
+export OPENAI_API_KEY=sk-...
 
-Common commands:
+# Add a registry source and install plugins
+go run ./cmd/agent plugins sources add official http://127.0.0.1:9080 --type registry
+go run ./cmd/agent plugins search
+go run ./cmd/agent plugins install ddg-research
+go run ./cmd/agent plugins enable ddg-research
 
-```bash
-go run ./cmd/agent run --profile ./_testing/profiles/readonly/profile.yaml "hello"
-go run ./cmd/agent chat --profile ./_testing/profiles/coding/profile.yaml
-go run ./cmd/agent sessions list
-go run ./cmd/agent plugins list
+# Run an agent
+go run ./cmd/agent run --profile researcher "Research the latest AI news"
 ```
 
 ## Plugin workflow
 
-Install a local plugin bundle:
-
 ```bash
-go run ./cmd/agent plugins install ../agent-plugins/send-email --link
+# Install (local, by name, or with version pinning)
+agent plugins install ../agent-plugins/send-email --link
+agent plugins install send-email --source official
+agent plugins install send-email@0.2.0
+
+# Configure
+agent plugins config set send-email provider smtp
+agent plugins config set send-email smtpPort 587
+agent plugins validate-config send-email
+agent plugins enable send-email
+
+# Upgrade and publish
+agent plugins upgrade send-email
+agent plugins publish ../agent-plugins/my-plugin --registry official
 ```
 
-Configure it from the CLI:
+## Profile workflow
 
 ```bash
-go run ./cmd/agent plugins config set send-email provider smtp
-go run ./cmd/agent plugins config set send-email baseURL http://127.0.0.1:8091
-go run ./cmd/agent plugins validate-config send-email
-go run ./cmd/agent plugins enable send-email
+# List, run, install
+agent profiles list
+agent run --profile researcher "Research OpenAI news"
+agent profiles install ./my-profiles/researcher
 ```
 
-More details:
+## Key features
 
-- `docs/plugins.md`
-- `docs/plugin-http-example.md`
-- `docs/mcp-bridge.md`
-- `docs/building-plugins.md`
-- `docs/plugin-runtime-choices.md`
-- `docs/examples/build-a-web-research-plugin.md`
+| Feature | Details |
+|---|---|
+| **Plugin sources** | Filesystem directories and HTTP registry servers |
+| **Version tracking** | Installed version and source recorded in config |
+| **Version pinning** | `plugins install name@0.2.0` for exact versions |
+| **Upgrade** | `plugins upgrade <name>` fetches latest from source |
+| **Publish** | `plugins publish <path> --registry <name>` with bearer auth |
+| **Dependencies** | `requires.plugins` enforced at registration time |
+| **envMapping** | Map plugin config keys to subprocess environment variables |
+| **Prompt IDs** | Profile `instructions.system` resolves plugin prompt IDs |
+| **Session compaction** | Pi-mono style: token-aware, structured summaries, turn-boundary cuts |
+| **Parallel sub-agents** | `agent/spawn-parallel` for concurrent sub-agent execution |
+| **Tool name sanitisation** | `py/word-count` → `py_word-count` for Bedrock/Azure compatibility |
 
-## Architecture docs
+## Documentation
 
-Planning and architecture notes live under `docs/architecture/plans/`.
+| Doc | What it covers |
+|---|---|
+| `docs/profiles.md` | Complete profile reference |
+| `docs/policy.md` | Policy system, overlay format, precedence |
+| `docs/prompts.md` | System instruction resolution, plugin prompt IDs |
+| `docs/plugins.md` | Plugin CLI: install, upgrade, publish, sources, config |
+| `docs/building-plugins.md` | How to build plugins, all contribution types, envMapping |
+| `docs/patterns/` | 6-pattern agent design guide with worked examples |
 
-Useful entry points:
+## Plugin inventory (14 plugins)
 
-- `docs/architecture/plans/go-agent-framework-plan.md`
-- `docs/architecture/plans/go-agent-framework-package-layout.md`
-- `docs/architecture/plans/go-agent-framework-v0.1-feature-list.md`
-- `docs/architecture/plans/go-agent-framework-plugin-spec.md`
+| Name | Runtime | Description |
+|---|---|---|
+| `core-tools` | host | Built-in read/write/edit/bash |
+| `ddg-research` | command (Go) | Real DuckDuckGo search + page fetch with date filtering |
+| `github-cli` | command (argv) | Wraps `gh` CLI — PRs, issues, repos |
+| `grafana-alerts` | command (Go) | Alert events, PromQL, LogQL via Grafana REST API |
+| `grafana-mcp` | mcp | MCP bridge to mcp-grafana |
+| `json-tool` | command (Go) | JSON echo example |
+| `kubectl` | command (argv) | Kubernetes — pods, deployments, events, logs, describe |
+| `mcp-filesystem` | mcp | MCP bridge to filesystem server |
+| `python-tool` | command (Python) | Word count example |
+| `send-email` | http | SMTP email draft and send |
+| `slack` | command (Go) | Post messages via Webhook or Web API |
+| `spawn-sub-agent` | host | Sequential and parallel sub-agent delegation |
+| `web-research` | http | Web search and fetch (HTTP runtime) |
 
-## Release checklist
+## Agent patterns (tested end-to-end)
 
-Before tagging a `v0.1` release, verify:
+| Pattern | Description |
+|---|---|
+| Single-tool agent | Wrap a CLI/script, one tool, one focused task |
+| Research agent | DDG search → fetch → synthesize |
+| Research + email | Research → email delivery pipeline |
+| Orchestrator + sub-agents | Parallel research → combined email |
+| Grafana ops summary | Alert events + Loki logs + PromQL metrics → email |
 
-- `go test ./...`
-- `go run ./cmd/agent doctor`
-- one provider-backed run works end to end
-- one plugin-backed tool works end to end
-- sessions can be created, listed, resumed, and exported
-
-Additional release docs:
-
-- `docs/release-checklist-v0.1.md`
-- `CHANGELOG.md`
-
-## Notes
-
-- The framework is currently an MCP client, not an MCP server.
-- Integration-specific code should stay out of the core runtime and live in plugin runtimes or external tool servers.
+See `docs/patterns/` for detailed walkthroughs with working profiles and prompts.

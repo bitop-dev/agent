@@ -650,6 +650,102 @@ spec:
 
 ---
 
+## Environment variable mapping (envMapping)
+
+For MCP and command plugins that need to pass config values to subprocess
+environment variables (e.g., API keys, URLs), use `envMapping` in the runtime
+section instead of requiring users to set a nested `env` object:
+
+```yaml
+spec:
+  runtime:
+    type: mcp
+    command: ["mcp-grafana", "-t", "stdio"]
+    envMapping:
+      grafanaURL: GRAFANA_URL           # config key → env var name
+      grafanaAPIKey: GRAFANA_API_KEY
+
+  configSchema:
+    type: object
+    properties:
+      grafanaURL:
+        type: string
+      grafanaAPIKey:
+        type: string
+        secret: true
+    required: [grafanaURL, grafanaAPIKey]
+```
+
+Users configure values normally:
+
+```bash
+agent plugins config set my-plugin grafanaURL https://grafana.example.com
+agent plugins config set my-plugin grafanaAPIKey glsa_abc123
+```
+
+The framework maps `config.grafanaURL` → `$GRAFANA_URL` and
+`config.grafanaAPIKey` → `$GRAFANA_API_KEY` when starting the subprocess.
+
+This works for both `mcp` runtimes (via the MCP manager) and `command` runtimes
+(via the descriptor tool executor).
+
+---
+
+## Plugin dependencies
+
+Plugins can declare dependencies on other plugins:
+
+```yaml
+spec:
+  requires:
+    framework: ">=0.1.0"
+    plugins:
+      - send-email      # requires send-email to be installed and enabled
+      - ddg-research    # requires ddg-research to be installed and enabled
+```
+
+Dependencies are enforced when the agent starts up and registers plugins.
+If a required plugin is missing or disabled, the agent reports:
+
+```
+plugin my-plugin requires plugin "send-email" which is not installed or enabled
+```
+
+**Important:** The `requires.plugins` field is an enforced contract, not documentation.
+If your plugin needs tools from another plugin, declare it here and it will be checked.
+
+---
+
+## Publishing plugins to a registry
+
+Once your plugin is ready to share, publish it to a registry server:
+
+```bash
+agent plugins publish ./my-plugin --registry official
+```
+
+This packs your plugin directory into a `.tar.gz` tarball with deterministic timestamps,
+validates the manifest, and POSTs it to the registry with the configured publish token.
+
+The registry source must have a `publishToken` in your config:
+
+```yaml
+pluginSources:
+  - name: official
+    type: registry
+    url: https://plugins.example.com
+    enabled: true
+    publishToken: your-secret-token
+```
+
+After publishing, anyone with the registry configured can install your plugin:
+
+```bash
+agent plugins install my-plugin
+```
+
+---
+
 ## Override summary
 
 | Contribution type | Auto-applied? | How to override |

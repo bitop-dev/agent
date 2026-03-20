@@ -433,6 +433,25 @@ agent run --profile coding "refactor this function"
 agent run --profile /tmp/test-profiles/my-agent.yaml "do something"
 ```
 
+### Install a profile from a directory
+
+Copy a profile directory to `~/.agent/profiles/` for permanent availability:
+
+```bash
+agent profiles install ./my-profiles/researcher
+```
+
+This reads the `profile.yaml` from the source directory, determines the profile name
+from `metadata.name`, and copies the entire directory to `~/.agent/profiles/<name>/`.
+
+Useful for sharing profiles between projects or installing profile templates from
+plugin examples:
+
+```bash
+# Install a plugin's example profile for customisation
+agent profiles install ../agent-plugins/send-email/examples/profiles/email-openai
+```
+
 ---
 
 ## Plugin-contributed profile templates
