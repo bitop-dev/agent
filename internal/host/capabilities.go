@@ -192,6 +192,104 @@ func (c *RuntimeCapabilities) SpawnSubRunParallel(ctx context.Context, reqs []pk
 	return results, errs
 }
 
+// RunPipeline executes a sequence of agent steps. Each step's output is stored
+// under its `as` name and available to subsequent steps via {{var}} expansion.
+// Steps with a Parallel field run their sub-steps concurrently.
+func (c *RuntimeCapabilities) RunPipeline(ctx context.Context, steps []pkghost.PipelineStep) (pkghost.PipelineResult, error) {
+	outputs := make(map[string]string)
+	var stepResults []pkghost.PipelineStepResult
+
+	for _, step := range steps {
+		// Parallel step — run sub-steps concurrently.
+		if len(step.Parallel) > 0 {
+			var reqs []pkghost.SubRunRequest
+			for _, ps := range step.Parallel {
+				reqs = append(reqs, pkghost.SubRunRequest{
+					Task:     expandTemplate(ps.Task, outputs),
+					Profile:  ps.Agent,
+					MaxTurns: defaultMaxTurns(ps.MaxTurns),
+					Context:  expandContextMap(ps.Context, outputs),
+				})
+			}
+			results, errs := c.SpawnSubRunParallel(ctx, reqs)
+			for i, ps := range step.Parallel {
+				sr := pkghost.PipelineStepResult{Agent: ps.Agent, As: ps.As}
+				if i < len(errs) && errs[i] != nil {
+					sr.Error = errs[i].Error()
+				} else if i < len(results) {
+					sr.Output = results[i].Output
+				}
+				if ps.As != "" && sr.Error == "" {
+					outputs[ps.As] = sr.Output
+				}
+				stepResults = append(stepResults, sr)
+			}
+			continue
+		}
+
+		// Sequential step — run one agent.
+		task := expandTemplate(step.Task, outputs)
+		stepCtx := expandContextMap(step.Context, outputs)
+
+		result, err := c.SpawnSubRun(ctx, pkghost.SubRunRequest{
+			Task:     task,
+			Profile:  step.Agent,
+			MaxTurns: defaultMaxTurns(step.MaxTurns),
+			Context:  stepCtx,
+		})
+
+		sr := pkghost.PipelineStepResult{Agent: step.Agent, As: step.As}
+		if err != nil {
+			sr.Error = err.Error()
+			stepResults = append(stepResults, sr)
+			// Pipeline continues on error — the next step sees the error in context.
+			if step.As != "" {
+				outputs[step.As] = fmt.Sprintf("[error from %s: %v]", step.Agent, err)
+			}
+			continue
+		}
+		sr.Output = result.Output
+		stepResults = append(stepResults, sr)
+		if step.As != "" {
+			outputs[step.As] = result.Output
+		}
+	}
+
+	return pkghost.PipelineResult{Steps: stepResults, Outputs: outputs}, nil
+}
+
+// expandTemplate replaces {{var}} placeholders in a string with values from the outputs map.
+func expandTemplate(tmpl string, outputs map[string]string) string {
+	result := tmpl
+	for k, v := range outputs {
+		result = strings.ReplaceAll(result, "{{"+k+"}}", v)
+	}
+	return result
+}
+
+// expandContextMap expands {{var}} in all string values of a context map.
+func expandContextMap(ctx map[string]any, outputs map[string]string) map[string]any {
+	if len(ctx) == 0 {
+		return nil
+	}
+	expanded := make(map[string]any, len(ctx))
+	for k, v := range ctx {
+		if s, ok := v.(string); ok {
+			expanded[k] = expandTemplate(s, outputs)
+		} else {
+			expanded[k] = v
+		}
+	}
+	return expanded
+}
+
+func defaultMaxTurns(n int) int {
+	if n <= 0 {
+		return 6
+	}
+	return n
+}
+
 type denyAllResolver struct{}
 
 func (denyAllResolver) Resolve(_ context.Context, req approval.Request) (approval.Decision, error) {

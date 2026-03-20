@@ -267,6 +267,35 @@ func (t DescriptorTool) runHost(ctx context.Context, call tool.Call) (tool.Resul
 			Data:   map[string]any{"sessionId": result.SessionID, "turns": result.Turns},
 		}, nil
 
+	case "run-pipeline":
+		stepsRaw, _ := call.Arguments["steps"].([]any)
+		if len(stepsRaw) == 0 {
+			return tool.Result{}, fmt.Errorf("agent/pipeline: steps is required and must be non-empty")
+		}
+		steps := parsePipelineSteps(stepsRaw)
+		pipelineResult, err := t.HostCaps.RunPipeline(ctx, steps)
+		if err != nil {
+			return tool.Result{}, err
+		}
+		// Build combined output.
+		var outputLines []string
+		for i, sr := range pipelineResult.Steps {
+			label := fmt.Sprintf("Step %d", i+1)
+			if sr.As != "" {
+				label = fmt.Sprintf("Step %d (%s)", i+1, sr.As)
+			}
+			if sr.Error != "" {
+				outputLines = append(outputLines, fmt.Sprintf("=== %s [%s] — ERROR ===\n%s", label, sr.Agent, sr.Error))
+			} else {
+				outputLines = append(outputLines, fmt.Sprintf("=== %s [%s] ===\n%s", label, sr.Agent, sr.Output))
+			}
+		}
+		return tool.Result{
+			ToolID: call.ToolID,
+			Output: strings.Join(outputLines, "\n\n"),
+			Data:   map[string]any{"steps": pipelineResult.Steps, "outputs": pipelineResult.Outputs},
+		}, nil
+
 	case "spawn-sub-agents-parallel":
 		tasksRaw, _ := call.Arguments["tasks"].([]any)
 		if len(tasksRaw) == 0 {
@@ -555,6 +584,37 @@ func isTemplatePlaceholder(s string) bool {
 
 func isFlag(s string) bool {
 	return strings.HasPrefix(s, "-")
+}
+
+func parsePipelineSteps(raw []any) []pkghost.PipelineStep {
+	var steps []pkghost.PipelineStep
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		step := pkghost.PipelineStep{
+			Agent: stringFromMap(m, "agent"),
+			Task:  stringFromMap(m, "task"),
+			As:    stringFromMap(m, "as"),
+		}
+		if mt, ok := m["maxTurns"].(float64); ok {
+			step.MaxTurns = int(mt)
+		}
+		if ctx, ok := m["context"].(map[string]any); ok {
+			step.Context = ctx
+		}
+		if parallel, ok := m["parallel"].([]any); ok {
+			step.Parallel = parsePipelineSteps(parallel)
+		}
+		steps = append(steps, step)
+	}
+	return steps
+}
+
+func stringFromMap(m map[string]any, key string) string {
+	v, _ := m[key].(string)
+	return v
 }
 
 func truncateStr(s string, max int) string {
