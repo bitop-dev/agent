@@ -64,6 +64,13 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 
 	transcript := append([]provider.Message{}, req.Transcript...)
 	transcript = append(transcript, provider.Message{Role: "user", Content: req.Prompt})
+	compactionEnabled := req.Profile.Spec.Session.Compaction == "auto"
+	// Rough token estimate: 1 token ≈ 4 chars. Reserve 16k for the response,
+	// keep the most recent ~20k tokens verbatim. Trigger compaction when the
+	// estimated total exceeds 80k tokens (320k chars), matching pi-mono's approach.
+	const reserveTokens = 16384
+	const keepRecentTokens = 20000
+	const contextTokenThreshold = 80000
 	toolsByID := make(map[string]tool.Tool, len(req.Tools))
 	toolDefs := make([]tool.Definition, 0, len(req.Tools))
 	for _, t := range req.Tools {
@@ -162,6 +169,21 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 		transcript = append(transcript, toolMessages...)
 		if err := sink.Publish(ctx, events.Event{Type: events.TypeTurnFinished, Time: time.Now(), Message: fmt.Sprintf("turn %d finished", turn+1)}); err != nil {
 			return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, err
+		}
+		// Compact when estimated context tokens exceed threshold — mirrors pi-mono's approach.
+		if compactionEnabled && estimateTranscriptTokens(transcript) > contextTokenThreshold-reserveTokens {
+			if compacted, compactionSummary, err := compactTranscript(ctx, req, transcript, keepRecentTokens); err == nil {
+				transcript = compacted
+				// Persist the compaction entry to the session so it survives resume.
+				if req.Sessions != nil && compactionSummary != "" {
+					_ = req.Sessions.Append(ctx, sessionID, session.Entry{
+						Kind:      session.EntryCompaction,
+						Role:      "system",
+						Content:   compactionSummary,
+						CreatedAt: time.Now(),
+					})
+				}
+			}
 		}
 		if len(toolHistory) >= maxExplorationToolCalls && strings.TrimSpace(output.String()) == "" {
 			break
@@ -493,4 +515,175 @@ func stringArg(args map[string]any, key string) string {
 	}
 	s, _ := v.(string)
 	return s
+}
+
+// estimateTranscriptTokens returns a rough token count for a transcript.
+// Uses the 4-chars-per-token heuristic.
+func estimateTranscriptTokens(transcript []provider.Message) int {
+	total := 0
+	for _, msg := range transcript {
+		total += len(msg.Content) / 4
+		for _, tc := range msg.ToolCalls {
+			total += (len(tc.ToolID) + len(fmt.Sprint(tc.Arguments))) / 4
+		}
+	}
+	return total
+}
+
+// compactTranscript summarises the older portion of a transcript, keeping
+// the most recent keepRecentTokens worth of messages verbatim. Mirrors
+// pi-mono's approach: structured summary format, serialised conversation text,
+// turn-boundary-aware cut point.
+//
+// Returns (compactedTranscript, summaryText, error). All errors are non-fatal —
+// the original transcript is returned unchanged on failure.
+func compactTranscript(ctx context.Context, req pkgruntime.RunRequest, transcript []provider.Message, keepRecentTokens int) ([]provider.Message, string, error) {
+	if len(transcript) < 8 {
+		return transcript, "", nil
+	}
+
+	// Walk backwards from the end to find the cut point:
+	// keep at most keepRecentTokens of recent messages verbatim,
+	// always cutting at a turn boundary (never inside a tool call pair).
+	cutIdx := findCompactionCutPoint(transcript, keepRecentTokens)
+	if cutIdx <= 1 {
+		return transcript, "", nil // nothing meaningful to compact
+	}
+
+	toSummarise := transcript[:cutIdx]
+	toKeep := transcript[cutIdx:]
+
+	// Serialise the messages to be summarised using labeled text so the LLM
+	// does not treat them as a live conversation (pi-mono's approach).
+	serialised := serializeForCompaction(toSummarise)
+
+	prompt := `You are summarizing a conversation between a user and an AI assistant.
+Produce a structured summary using EXACTLY this format:
+
+## Goal
+[What the user is trying to accomplish]
+
+## Constraints & Preferences
+- [Requirements or preferences mentioned]
+
+## Progress
+### Done
+- [x] [Completed tasks]
+
+### In Progress
+- [ ] [Current work, if any]
+
+### Blocked
+- [Issues blocking progress, if any]
+
+## Key Decisions
+- **[Decision]**: [Rationale]
+
+## Next Steps
+1. [What should happen next]
+
+## Critical Context
+- [Any data, values, paths, or facts needed to continue]
+
+---
+Conversation to summarize:
+
+` + serialised
+
+	stream, err := req.Provider.Stream(ctx, provider.CompletionRequest{
+		Model:    provider.ModelRef{Provider: req.Provider.Name(), Model: req.Profile.Spec.Provider.Model},
+		Messages: []provider.Message{{Role: "user", Content: prompt}},
+		Tools:    nil,
+	})
+	if err != nil {
+		return transcript, "", nil // non-fatal
+	}
+	var summaryBuf strings.Builder
+	for event := range stream {
+		if event.Type == provider.StreamEventText {
+			summaryBuf.WriteString(event.Text)
+		}
+	}
+	summaryText := strings.TrimSpace(summaryBuf.String())
+	if summaryText == "" {
+		return transcript, "", nil
+	}
+
+	// Replace summarised messages with a single assistant summary message.
+	compacted := make([]provider.Message, 0, 1+len(toKeep))
+	compacted = append(compacted, provider.Message{
+		Role:    "assistant",
+		Content: "[Context compacted — summary of earlier conversation]\n\n" + summaryText,
+	})
+	compacted = append(compacted, toKeep...)
+	return compacted, summaryText, nil
+}
+
+// findCompactionCutPoint walks backwards through the transcript, accumulating
+// token estimates until keepRecentTokens is reached. Returns the index of the
+// first message to keep verbatim. Always cuts at a turn boundary — never
+// between an assistant tool_call and its corresponding tool result.
+func findCompactionCutPoint(transcript []provider.Message, keepRecentTokens int) int {
+	tokens := 0
+	for i := len(transcript) - 1; i >= 1; i-- {
+		msg := transcript[i]
+		tokens += len(msg.Content)/4 + 10
+
+		if tokens >= keepRecentTokens {
+			// Back up to the nearest safe turn boundary (user message).
+			for i > 1 && transcript[i].Role != "user" {
+				i--
+			}
+			return i
+		}
+	}
+	return 1 // keep everything except the very first message
+}
+
+// serializeForCompaction converts a message slice to labeled text that prevents
+// the LLM from treating it as a live conversation to continue.
+// Mirrors pi-mono's serializeConversation() approach.
+func serializeForCompaction(messages []provider.Message) string {
+	const maxToolResult = 2000 // truncate long tool results like pi-mono does
+	var buf strings.Builder
+	for _, msg := range messages {
+		switch msg.Role {
+		case "user":
+			buf.WriteString("[User]: ")
+			buf.WriteString(strings.TrimSpace(msg.Content))
+			buf.WriteString("\n\n")
+		case "assistant":
+			if len(msg.ToolCalls) > 0 {
+				var calls []string
+				for _, tc := range msg.ToolCalls {
+					args := fmt.Sprint(tc.Arguments)
+					if len(args) > 120 {
+						args = args[:120] + "…"
+					}
+					calls = append(calls, fmt.Sprintf("%s(%s)", tc.ToolID, args))
+				}
+				buf.WriteString("[Assistant tool calls]: ")
+				buf.WriteString(strings.Join(calls, "; "))
+				buf.WriteString("\n\n")
+			}
+			if content := strings.TrimSpace(msg.Content); content != "" {
+				buf.WriteString("[Assistant]: ")
+				buf.WriteString(content)
+				buf.WriteString("\n\n")
+			}
+		case "tool":
+			content := strings.TrimSpace(msg.Content)
+			if len(content) > maxToolResult {
+				content = content[:maxToolResult] + fmt.Sprintf("\n… [%d chars truncated]", len(content)-maxToolResult)
+			}
+			name := msg.ToolName
+			if name == "" {
+				name = "tool"
+			}
+			buf.WriteString(fmt.Sprintf("[Tool result (%s)]: ", name))
+			buf.WriteString(content)
+			buf.WriteString("\n\n")
+		}
+	}
+	return buf.String()
 }
