@@ -43,10 +43,12 @@ type Spec struct {
 }
 
 type Runtime struct {
-	Type     RuntimeType `yaml:"type"`
-	Command  []string    `yaml:"command,omitempty"`
-	Endpoint string      `yaml:"endpoint,omitempty"`
-	Protocol string      `yaml:"protocol,omitempty"`
+	Type     RuntimeType       `yaml:"type"`
+	Command  []string          `yaml:"command,omitempty"`
+	Endpoint string            `yaml:"endpoint,omitempty"`
+	Protocol string            `yaml:"protocol,omitempty"`
+	Headers  map[string]string `yaml:"headers,omitempty"`
+	Env      map[string]string `yaml:"env,omitempty"`
 }
 
 type Schema struct {

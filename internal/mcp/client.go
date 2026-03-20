@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os/exec"
 	"strings"
 	"sync"
@@ -14,11 +16,14 @@ import (
 
 // Client speaks the MCP JSON-RPC protocol over stdio or an HTTP connection.
 type Client struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	mu     sync.Mutex
-	nextID atomic.Int64
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	stdout     *bufio.Reader
+	httpClient *http.Client
+	endpoint   string
+	headers    map[string]string
+	mu         sync.Mutex
+	nextID     atomic.Int64
 }
 
 type request struct {
@@ -91,6 +96,22 @@ func StartStdio(ctx context.Context, command []string, env []string) (*Client, e
 	return c, nil
 }
 
+// StartRemote connects to an HTTP/SSE MCP endpoint and performs the initialize handshake.
+func StartRemote(ctx context.Context, endpoint string, headers map[string]string) (*Client, error) {
+	if strings.TrimSpace(endpoint) == "" {
+		return nil, fmt.Errorf("mcp: endpoint is required")
+	}
+	client := &Client{
+		httpClient: &http.Client{},
+		endpoint:   endpoint,
+		headers:    copyHeaders(headers),
+	}
+	if err := client.initialize(ctx); err != nil {
+		return nil, fmt.Errorf("mcp: initialize: %w", err)
+	}
+	return client, nil
+}
+
 // ListTools calls tools/list and returns the available tools.
 func (c *Client) ListTools(ctx context.Context) ([]ToolInfo, error) {
 	var result struct {
@@ -139,7 +160,9 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments map[string
 
 // Close stops the MCP server process.
 func (c *Client) Close() error {
-	_ = c.stdin.Close()
+	if c.stdin != nil {
+		_ = c.stdin.Close()
+	}
 	if c.cmd != nil && c.cmd.Process != nil {
 		return c.cmd.Process.Kill()
 	}
@@ -168,6 +191,9 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 	defer c.mu.Unlock()
 	id := c.nextID.Add(1)
 	req := request{JSONRPC: "2.0", ID: id, Method: method, Params: params}
+	if c.endpoint != "" {
+		return c.callRemote(ctx, req, result)
+	}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return err
@@ -201,6 +227,48 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 	}
 }
 
+func (c *Client) callRemote(ctx context.Context, req request, result any) error {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("mcp http request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	for k, v := range c.headers {
+		httpReq.Header.Set(k, v)
+	}
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("mcp http do: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mcp http error: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	var rpcResp response
+	if strings.Contains(contentType, "text/event-stream") {
+		rpcResp, err = readSSEResponse(resp.Body, req.ID)
+	} else {
+		rpcResp, err = readJSONResponse(resp.Body)
+	}
+	if err != nil {
+		return err
+	}
+	if rpcResp.Error != nil {
+		return fmt.Errorf("mcp error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+	if result != nil {
+		return json.Unmarshal(rpcResp.Result, result)
+	}
+	return nil
+}
+
 func (c *Client) notify(method string, params any) error {
 	n := map[string]any{"jsonrpc": "2.0", "method": method}
 	if params != nil {
@@ -210,6 +278,76 @@ func (c *Client) notify(method string, params any) error {
 	if err != nil {
 		return err
 	}
+	if c.endpoint != "" {
+		httpReq, err := http.NewRequest(http.MethodPost, c.endpoint, bytes.NewReader(data))
+		if err != nil {
+			return err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "application/json, text/event-stream")
+		for k, v := range c.headers {
+			httpReq.Header.Set(k, v)
+		}
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("mcp http notify error: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		}
+		return nil
+	}
 	_, err = fmt.Fprintf(c.stdin, "%s\n", data)
 	return err
+}
+
+func readJSONResponse(body io.Reader) (response, error) {
+	var resp response
+	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		return response{}, fmt.Errorf("mcp decode response: %w", err)
+	}
+	return resp, nil
+}
+
+func readSSEResponse(body io.Reader, id int64) (response, error) {
+	scanner := bufio.NewScanner(body)
+	var dataLines []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			if len(dataLines) == 0 {
+				continue
+			}
+			payload := strings.Join(dataLines, "\n")
+			dataLines = nil
+			var resp response
+			if err := json.Unmarshal([]byte(payload), &resp); err != nil {
+				continue
+			}
+			if resp.ID == id || resp.ID == 0 {
+				return resp, nil
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return response{}, fmt.Errorf("mcp read sse: %w", err)
+	}
+	return response{}, io.EOF
+}
+
+func copyHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for k, v := range headers {
+		out[k] = v
+	}
+	return out
 }

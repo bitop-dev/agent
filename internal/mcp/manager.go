@@ -61,6 +61,9 @@ func (m *Manager) Close() {
 func (m *Manager) start(ctx context.Context, manifest plg.Manifest, cfg config.PluginConfig) (*Client, error) {
 	rt := manifest.Spec.Runtime
 	command := rt.Command
+	endpoint := strings.TrimSpace(rt.Endpoint)
+	headers := mergeStringMaps(rt.Headers, resolveStringMap(cfg.Config, "headers"))
+	envMap := mergeStringMaps(rt.Env, resolveStringMap(cfg.Config, "env"))
 	// Config can override the command.
 	if rawCmd, ok := cfg.Config["command"]; ok {
 		switch v := rawCmd.(type) {
@@ -77,15 +80,60 @@ func (m *Manager) start(ctx context.Context, manifest plg.Manifest, cfg config.P
 			command = v
 		}
 	}
-	if len(command) == 0 {
-		return nil, fmt.Errorf("mcp plugin %s has no command configured", manifest.Metadata.Name)
-	}
-	// Expand env from plugin config.
-	env := os.Environ()
-	if envMap, ok := cfg.Config["env"].(map[string]any); ok {
-		for k, v := range envMap {
-			env = append(env, fmt.Sprintf("%s=%v", k, v))
+	if rawEndpoint, ok := cfg.Config["endpoint"]; ok {
+		if s, ok := rawEndpoint.(string); ok {
+			endpoint = strings.TrimSpace(s)
 		}
 	}
+	if endpoint != "" {
+		return StartRemote(ctx, endpoint, headers)
+	}
+	if len(command) == 0 {
+		return nil, fmt.Errorf("mcp plugin %s has no command or endpoint configured", manifest.Metadata.Name)
+	}
+	// Expand env from runtime defaults and plugin config.
+	env := os.Environ()
+	for k, v := range envMap {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	for k, v := range headers {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
 	return StartStdio(ctx, command, env)
+}
+
+func resolveStringMap(cfg map[string]any, key string) map[string]string {
+	raw, ok := cfg[key]
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string)
+	switch v := raw.(type) {
+	case map[string]any:
+		for key, value := range v {
+			out[key] = fmt.Sprint(value)
+		}
+	case map[string]string:
+		for key, value := range v {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func mergeStringMaps(base, override map[string]string) map[string]string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(base)+len(override))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range override {
+		out[k] = v
+	}
+	return out
 }

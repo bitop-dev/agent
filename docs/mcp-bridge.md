@@ -36,8 +36,12 @@ spec:
       - my-mcp-server
       - --config
       - /path/to/config.json
+    env:
+      API_KEY: default-token
     # or use endpoint for HTTP-based MCP:
     # endpoint: http://localhost:3000/mcp
+    # headers:
+    #   Authorization: Bearer default-token
 
   contributes:
     tools: []  # populated from MCP server discovery
@@ -47,6 +51,10 @@ spec:
     properties:
       endpoint:
         type: string
+      headers:
+        type: object
+      env:
+        type: object
   requires:
     framework: ">=0.1.0"
     plugins: []
@@ -67,6 +75,8 @@ runtime:
     - npx
     - -y
     - "@my-org/mcp-server"
+  env:
+    API_KEY: default-token
 ```
 
 ### HTTP/SSE
@@ -77,6 +87,16 @@ Some MCP servers expose an HTTP endpoint.
 runtime:
   type: mcp
   endpoint: http://localhost:3000/mcp
+  headers:
+    Authorization: Bearer default-token
+```
+
+Spec values are defaults. A local install can override them with plugin config:
+
+```bash
+go run ./cmd/agent plugins config set my-mcp-plugin endpoint https://mcp.example.com/mcp
+go run ./cmd/agent plugins config set my-mcp-plugin headers '{"Authorization":"Bearer local-token"}'
+go run ./cmd/agent plugins config set my-mcp-plugin env '{"API_KEY":"local-secret"}'
 ```
 
 ## MCP protocol overview
@@ -148,22 +168,23 @@ Tool result:
 
 ## v0.1 scope for MCP bridge
 
-Phase 1 (current):
+Current support:
 
 - plugin manifest parsing with `runtime.type: mcp`
 - stdio transport: spawn command, communicate via stdin/stdout
+- remote endpoint transport over HTTP
+- SSE response handling for MCP servers that return `text/event-stream`
 - `initialize` handshake
 - `tools/list` for auto-discovery
 - `tools/call` for tool execution
-- tool registration into the tool registry at bootstrap
+- tool registration into the tool registry at bootstrap, including MCP plugins with dynamic `tools/list` discovery and no statically declared tools
 
-Phase 2 (later):
+Still later:
 
-- HTTP/SSE transport
-- resource listing and reading
-- prompt listing and reading
+- MCP resources (`resources/list`, `resources/read`)
+- MCP prompts (`prompts/list`, `prompts/get`)
 - sampling support
-- reconnection and health checks
+- richer reconnection, pooling, and health checks
 
 ## Security model
 
@@ -186,3 +207,22 @@ Running with an MCP-enabled profile:
 ```bash
 go run ./cmd/agent run --profile ./_testing/plugins/mcp-filesystem/profiles/researcher.yaml "Summarize all markdown files in /tmp"
 ```
+
+Using a remote MCP endpoint with headers:
+
+```yaml
+runtime:
+  type: mcp
+  endpoint: https://mcp.example.com/mcp
+```
+
+Then configure request headers if needed:
+
+```bash
+go run ./cmd/agent plugins config set my-mcp-plugin headers '{"Authorization":"Bearer token"}'
+go run ./cmd/agent plugins enable my-mcp-plugin
+```
+
+The MCP manager will use `endpoint` when configured, otherwise it will fall back to `command`.
+
+For transport-specific setup examples, see `docs/examples/build-an-mcp-plugin.md`.

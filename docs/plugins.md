@@ -10,6 +10,7 @@ If you want the conceptual overview first, start with:
 - `docs/plugin-runtime-choices.md`
 - `docs/examples/build-a-web-research-plugin.md`
 - `docs/examples/build-a-send-email-plugin.md`
+- `docs/examples/build-an-mcp-plugin.md`
 - `docs/plugin-author-checklist.md`
 
 ## Common commands

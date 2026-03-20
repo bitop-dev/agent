@@ -420,6 +420,7 @@ For custom HTTP service integrations, I recommend `http`.
 - `docs/plugins.md`
 - `docs/plugin-http-example.md`
 - `docs/mcp-bridge.md`
+- `docs/examples/build-an-mcp-plugin.md`
 - `docs/plugin-runtime-choices.md`
 - `docs/examples/build-a-web-research-plugin.md`
 - `docs/examples/build-a-send-email-plugin.md`
