@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	pkghost "github.com/ncecere/agent/pkg/host"
-	"github.com/ncecere/agent/pkg/tool"
+	pkghost "github.com/bitop-dev/agent/pkg/host"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 // SpawnTool implements agent/spawn using the host capabilities API.
@@ -19,7 +19,7 @@ type SpawnTool struct {
 
 func (t SpawnTool) Definition() tool.Definition {
 	return tool.Definition{
-		ID:          "github.com/ncecere/agent/spawn",
+		ID:          "github.com/bitop-dev/agent/spawn",
 		Description: "Spawn a bounded sub-agent task using an allowed profile and tool set",
 		Schema: map[string]any{
 			"type": "object",
@@ -40,7 +40,7 @@ func (t SpawnTool) Operation() string {
 func (t SpawnTool) Run(ctx context.Context, call tool.Call) (tool.Result, error) {
 	task, ok := call.Arguments["task"].(string)
 	if !ok || task == "" {
-		return tool.Result{}, fmt.Errorf("github.com/ncecere/agent/spawn: task is required")
+		return tool.Result{}, fmt.Errorf("github.com/bitop-dev/agent/spawn: task is required")
 	}
 	profile := ""
 	if p, ok := call.Arguments["profile"].(string); ok {
@@ -54,7 +54,7 @@ func (t SpawnTool) Run(ctx context.Context, call tool.Call) (tool.Result, error)
 		maxTurns = t.MaxDepth * 4
 	}
 	if profile != "" && !t.isAllowedProfile(profile) {
-		return tool.Result{}, fmt.Errorf("github.com/ncecere/agent/spawn: profile %q is not in the allowed profiles list", profile)
+		return tool.Result{}, fmt.Errorf("github.com/bitop-dev/agent/spawn: profile %q is not in the allowed profiles list", profile)
 	}
 	result, err := t.Caps.SpawnSubRun(ctx, pkghost.SubRunRequest{
 		Task:     task,
@@ -62,7 +62,7 @@ func (t SpawnTool) Run(ctx context.Context, call tool.Call) (tool.Result, error)
 		MaxTurns: maxTurns,
 	})
 	if err != nil {
-		return tool.Result{}, fmt.Errorf("github.com/ncecere/agent/spawn: %w", err)
+		return tool.Result{}, fmt.Errorf("github.com/bitop-dev/agent/spawn: %w", err)
 	}
 	return tool.Result{
 		ToolID: call.ToolID,

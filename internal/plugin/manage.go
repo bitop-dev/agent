@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	loaderutil "github.com/ncecere/agent/internal/loader"
-	"github.com/ncecere/agent/pkg/config"
-	plg "github.com/ncecere/agent/pkg/plugin"
+	loaderutil "github.com/bitop-dev/agent/internal/loader"
+	"github.com/bitop-dev/agent/pkg/config"
+	plg "github.com/bitop-dev/agent/pkg/plugin"
 )
 
 // SourceMatch is a search result entry pairing a source with a discovered plugin.

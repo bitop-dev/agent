@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	loaderutil "github.com/ncecere/agent/internal/loader"
-	"github.com/ncecere/agent/pkg/policy"
+	loaderutil "github.com/bitop-dev/agent/internal/loader"
+	"github.com/bitop-dev/agent/pkg/policy"
 )
 
 type overlayFile struct {

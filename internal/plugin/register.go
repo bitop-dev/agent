@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	loaderutil "github.com/ncecere/agent/internal/loader"
-	"github.com/ncecere/agent/internal/mcp"
-	"github.com/ncecere/agent/internal/registry"
-	"github.com/ncecere/agent/pkg/config"
-	pkghost "github.com/ncecere/agent/pkg/host"
-	plg "github.com/ncecere/agent/pkg/plugin"
-	"github.com/ncecere/agent/pkg/tool"
+	loaderutil "github.com/bitop-dev/agent/internal/loader"
+	"github.com/bitop-dev/agent/internal/mcp"
+	"github.com/bitop-dev/agent/internal/registry"
+	"github.com/bitop-dev/agent/pkg/config"
+	pkghost "github.com/bitop-dev/agent/pkg/host"
+	plg "github.com/bitop-dev/agent/pkg/plugin"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 type Registries struct {

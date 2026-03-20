@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 
-	"github.com/ncecere/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 type ModelRef struct {

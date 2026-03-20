@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ncecere/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 type GrepTool struct{}

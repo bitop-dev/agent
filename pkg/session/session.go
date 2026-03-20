@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ncecere/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 type Metadata struct {

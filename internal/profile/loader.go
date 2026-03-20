@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	loaderutil "github.com/ncecere/agent/internal/loader"
-	pf "github.com/ncecere/agent/pkg/profile"
+	loaderutil "github.com/bitop-dev/agent/internal/loader"
+	pf "github.com/bitop-dev/agent/pkg/profile"
 )
 
 type Discovered struct {

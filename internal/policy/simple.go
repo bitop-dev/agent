@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ncecere/agent/pkg/policy"
-	"github.com/ncecere/agent/pkg/workspace"
+	"github.com/bitop-dev/agent/pkg/policy"
+	"github.com/bitop-dev/agent/pkg/workspace"
 )
 
 type Engine struct {

@@ -1,4 +1,4 @@
-module github.com/ncecere/agent
+module github.com/bitop-dev/agent
 
 go 1.26.0
 

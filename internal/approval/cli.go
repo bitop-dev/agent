@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/ncecere/agent/pkg/approval"
+	"github.com/bitop-dev/agent/pkg/approval"
 )
 
 type CLIResolver struct {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ncecere/agent/internal/cli"
+	"github.com/bitop-dev/agent/internal/cli"
 )
 
 func main() {

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ncecere/agent/pkg/config"
-	plg "github.com/ncecere/agent/pkg/plugin"
-	"github.com/ncecere/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/config"
+	plg "github.com/bitop-dev/agent/pkg/plugin"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 // Manager owns MCP client lifecycle. One client per enabled MCP plugin.

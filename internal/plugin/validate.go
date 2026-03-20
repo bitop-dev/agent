@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ncecere/agent/pkg/config"
-	plg "github.com/ncecere/agent/pkg/plugin"
+	"github.com/bitop-dev/agent/pkg/config"
+	plg "github.com/bitop-dev/agent/pkg/plugin"
 )
 
 func ValidateManifest(manifest plg.Manifest) error {

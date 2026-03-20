@@ -3,13 +3,13 @@ package plugin
 import (
 	"testing"
 
-	"github.com/ncecere/agent/pkg/config"
-	plg "github.com/ncecere/agent/pkg/plugin"
+	"github.com/bitop-dev/agent/pkg/config"
+	plg "github.com/bitop-dev/agent/pkg/plugin"
 )
 
 func TestValidateConfigRequiresFields(t *testing.T) {
 	manifest := plg.Manifest{
-		APIVersion: "github.com/ncecere/agent/v1",
+		APIVersion: "github.com/bitop-dev/agent/v1",
 		Kind:       "Plugin",
 		Metadata:   plg.Metadata{Name: "send-email"},
 		Spec: plg.Spec{
@@ -33,7 +33,7 @@ func TestValidateConfigRequiresFields(t *testing.T) {
 
 func TestValidateConfigRejectsWrongTypes(t *testing.T) {
 	manifest := plg.Manifest{
-		APIVersion: "github.com/ncecere/agent/v1",
+		APIVersion: "github.com/bitop-dev/agent/v1",
 		Kind:       "Plugin",
 		Metadata:   plg.Metadata{Name: "web-research"},
 		Spec: plg.Spec{

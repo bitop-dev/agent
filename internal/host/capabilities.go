@@ -8,16 +8,16 @@ import (
 	"strings"
 	"sync"
 
-	internalpolicy "github.com/ncecere/agent/internal/policy"
-	profileloader "github.com/ncecere/agent/internal/profile"
-	"github.com/ncecere/agent/internal/registry"
-	internalruntime "github.com/ncecere/agent/internal/runtime"
-	"github.com/ncecere/agent/pkg/approval"
-	"github.com/ncecere/agent/pkg/events"
-	pkghost "github.com/ncecere/agent/pkg/host"
-	pkgruntime "github.com/ncecere/agent/pkg/runtime"
-	"github.com/ncecere/agent/pkg/tool"
-	"github.com/ncecere/agent/pkg/workspace"
+	internalpolicy "github.com/bitop-dev/agent/internal/policy"
+	profileloader "github.com/bitop-dev/agent/internal/profile"
+	"github.com/bitop-dev/agent/internal/registry"
+	internalruntime "github.com/bitop-dev/agent/internal/runtime"
+	"github.com/bitop-dev/agent/pkg/approval"
+	"github.com/bitop-dev/agent/pkg/events"
+	pkghost "github.com/bitop-dev/agent/pkg/host"
+	pkgruntime "github.com/bitop-dev/agent/pkg/runtime"
+	"github.com/bitop-dev/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/workspace"
 )
 
 // RuntimeCapabilities implements pkg/host.Capabilities.

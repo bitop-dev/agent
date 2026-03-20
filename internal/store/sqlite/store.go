@@ -11,7 +11,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/ncecere/agent/pkg/session"
+	"github.com/bitop-dev/agent/pkg/session"
 )
 
 type Store struct {

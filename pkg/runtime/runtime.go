@@ -3,14 +3,14 @@ package runtime
 import (
 	"context"
 
-	"github.com/ncecere/agent/pkg/approval"
-	"github.com/ncecere/agent/pkg/events"
-	"github.com/ncecere/agent/pkg/policy"
-	"github.com/ncecere/agent/pkg/profile"
-	"github.com/ncecere/agent/pkg/provider"
-	"github.com/ncecere/agent/pkg/session"
-	"github.com/ncecere/agent/pkg/tool"
-	"github.com/ncecere/agent/pkg/workspace"
+	"github.com/bitop-dev/agent/pkg/approval"
+	"github.com/bitop-dev/agent/pkg/events"
+	"github.com/bitop-dev/agent/pkg/policy"
+	"github.com/bitop-dev/agent/pkg/profile"
+	"github.com/bitop-dev/agent/pkg/provider"
+	"github.com/bitop-dev/agent/pkg/session"
+	"github.com/bitop-dev/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/workspace"
 )
 
 type Runner interface {

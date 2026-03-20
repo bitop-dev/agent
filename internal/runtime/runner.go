@@ -12,13 +12,13 @@ import (
 	"math"
 	"math/rand"
 
-	"github.com/ncecere/agent/pkg/approval"
-	"github.com/ncecere/agent/pkg/events"
-	"github.com/ncecere/agent/pkg/policy"
-	"github.com/ncecere/agent/pkg/provider"
-	pkgruntime "github.com/ncecere/agent/pkg/runtime"
-	"github.com/ncecere/agent/pkg/session"
-	"github.com/ncecere/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/approval"
+	"github.com/bitop-dev/agent/pkg/events"
+	"github.com/bitop-dev/agent/pkg/policy"
+	"github.com/bitop-dev/agent/pkg/provider"
+	pkgruntime "github.com/bitop-dev/agent/pkg/runtime"
+	"github.com/bitop-dev/agent/pkg/session"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 type Runner struct{}

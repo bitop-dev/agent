@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ncecere/agent/internal/registry"
-	"github.com/ncecere/agent/pkg/config"
-	plg "github.com/ncecere/agent/pkg/plugin"
-	"github.com/ncecere/agent/pkg/tool"
+	"github.com/bitop-dev/agent/internal/registry"
+	"github.com/bitop-dev/agent/pkg/config"
+	plg "github.com/bitop-dev/agent/pkg/plugin"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 func TestDescriptorToolRunHTTP(t *testing.T) {

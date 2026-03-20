@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ncecere/agent/pkg/config"
+	"github.com/bitop-dev/agent/pkg/config"
 )
 
 func TestResolveSourceFromFilesystemPluginSource(t *testing.T) {

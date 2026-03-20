@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ncecere/agent/pkg/provider"
-	"github.com/ncecere/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/provider"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 const (

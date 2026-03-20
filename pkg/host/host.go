@@ -3,7 +3,7 @@ package host
 import (
 	"context"
 
-	"github.com/ncecere/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 // Capabilities is the bounded API surface exposed to privileged host-runtime plugins.

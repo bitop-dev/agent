@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ncecere/agent/pkg/tool"
+	"github.com/bitop-dev/agent/pkg/tool"
 )
 
 // Tool wraps an MCP tool so it satisfies the framework's tool.Tool interface.
