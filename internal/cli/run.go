@@ -16,6 +16,7 @@ import (
 	"time"
 
 	internalplugin "github.com/ncecere/agent/internal/plugin"
+	"github.com/ncecere/agent/internal/registry"
 	"github.com/ncecere/agent/internal/service"
 	"github.com/ncecere/agent/pkg/config"
 	"github.com/ncecere/agent/pkg/events"
@@ -1079,20 +1080,45 @@ func compactText(text string, max int) string {
 	return text[:max-3] + "..."
 }
 
-func loadSystemInstructions(profilePath string, refs []string) string {
+// loadSystemInstructions builds the full system prompt from the profile's
+// instructions.system list. Each entry is resolved in this order:
+//
+//  1. Registered prompt ID — if the entry matches a prompt registered by an
+//     enabled plugin (e.g. "email/style-default"), the plugin's prompt file is
+//     loaded. This lets profiles reference plugin-contributed prompts by ID
+//     without hard-coding file paths.
+//
+//  2. File path — the entry is treated as a path relative to the profile
+//     directory (or absolute). The file is read and its content is used.
+//
+//  3. Inline text — if neither lookup succeeds the entry itself is used as
+//     literal prompt text, useful for short one-line instructions.
+//
+// All resolved chunks are joined with a blank line separator.
+func loadSystemInstructions(profilePath string, refs []string, prompts *registry.PromptRegistry) string {
 	baseDir := filepath.Dir(profilePath)
 	chunks := make([]string, 0, len(refs))
 	for _, ref := range refs {
+		// 1. Try as a registered plugin prompt ID.
+		if prompts != nil {
+			if asset, ok := prompts.Get(ref); ok && asset.Path != "" {
+				if data, err := os.ReadFile(asset.Path); err == nil {
+					chunks = append(chunks, strings.TrimSpace(string(data)))
+					continue
+				}
+			}
+		}
+		// 2. Try as a file path relative to the profile directory.
 		candidate := ref
 		if !filepath.IsAbs(candidate) {
 			candidate = filepath.Join(baseDir, candidate)
 		}
-		data, err := os.ReadFile(candidate)
-		if err != nil {
-			chunks = append(chunks, ref)
+		if data, err := os.ReadFile(candidate); err == nil {
+			chunks = append(chunks, strings.TrimSpace(string(data)))
 			continue
 		}
-		chunks = append(chunks, strings.TrimSpace(string(data)))
+		// 3. Use as inline literal text.
+		chunks = append(chunks, ref)
 	}
 	return strings.Join(chunks, "\n\n")
 }
@@ -1135,7 +1161,7 @@ func executeRun(ctx context.Context, app service.App, input runInput) (pkgruntim
 	eventSink := streamSink{Writer: os.Stdout}
 	runReq := pkgruntime.RunRequest{
 		Prompt:       input.Prompt,
-		SystemPrompt: loadSystemInstructions(input.ProfilePath, input.Manifest.Spec.Instructions.System),
+		SystemPrompt: loadSystemInstructions(input.ProfilePath, input.Manifest.Spec.Instructions.System, app.Prompts),
 		Profile:      input.Manifest,
 		Provider:     input.ProviderImpl,
 		Tools:        input.Tools,

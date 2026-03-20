@@ -25,6 +25,7 @@ type RuntimeCapabilities struct {
 	Profiles     profileloader.Loader
 	Tools        *registry.ToolRegistry
 	Providers    *registry.ProviderRegistry
+	Prompts      *registry.PromptRegistry
 	DefaultCWD   string
 	MaxDepth     int
 	currentDepth int
@@ -65,7 +66,7 @@ func (c *RuntimeCapabilities) SpawnSubRun(ctx context.Context, req pkghost.SubRu
 	runner := internalruntime.Runner{}
 	runReq := pkgruntime.RunRequest{
 		Prompt:       req.Task,
-		SystemPrompt: loadSystemPrompt(profilePath, manifest.Spec.Instructions.System),
+		SystemPrompt: loadSystemPrompt(profilePath, manifest.Spec.Instructions.System, c.Prompts),
 		Profile:      manifest,
 		Provider:     providerImpl,
 		Tools:        toolsForRun,
@@ -120,20 +121,30 @@ func resolveTools(reg *registry.ToolRegistry, ids []string) ([]tool.Tool, error)
 	return out, nil
 }
 
-func loadSystemPrompt(profilePath string, refs []string) string {
+func loadSystemPrompt(profilePath string, refs []string, prompts *registry.PromptRegistry) string {
 	baseDir := filepath.Dir(profilePath)
 	chunks := make([]string, 0, len(refs))
 	for _, ref := range refs {
+		// 1. Try as a registered plugin prompt ID.
+		if prompts != nil {
+			if asset, ok := prompts.Get(ref); ok && asset.Path != "" {
+				if data, err := os.ReadFile(asset.Path); err == nil {
+					chunks = append(chunks, strings.TrimSpace(string(data)))
+					continue
+				}
+			}
+		}
+		// 2. Try as a file path relative to the profile directory.
 		candidate := ref
 		if !filepath.IsAbs(candidate) {
 			candidate = filepath.Join(baseDir, candidate)
 		}
-		data, err := os.ReadFile(candidate)
-		if err != nil {
-			chunks = append(chunks, ref)
+		if data, err := os.ReadFile(candidate); err == nil {
+			chunks = append(chunks, strings.TrimSpace(string(data)))
 			continue
 		}
-		chunks = append(chunks, strings.TrimSpace(string(data)))
+		// 3. Use as inline literal text.
+		chunks = append(chunks, ref)
 	}
 	return strings.Join(chunks, "\n\n")
 }

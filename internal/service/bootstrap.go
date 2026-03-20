@@ -83,6 +83,7 @@ func Bootstrap(cwd string) (App, error) {
 		Profiles:   profileLoaderInst,
 		Tools:      toolRegistry,
 		Providers:  providerRegistry,
+		Prompts:    promptRegistry,
 		DefaultCWD: paths.CWD,
 		MaxDepth:   2,
 	}
