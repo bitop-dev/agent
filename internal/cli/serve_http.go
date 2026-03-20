@@ -51,8 +51,10 @@ type healthResponse struct {
 // profile is accepted. If empty, any profile can be requested per-task.
 func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) error {
 	startedAt := time.Now()
+	bus := NewMessageBus()
 
 	mux := http.NewServeMux()
+	registerMessageHandlers(mux, bus)
 
 	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		profiles, _ := app.Profiles.Discover(ctx)
