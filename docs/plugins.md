@@ -4,6 +4,8 @@ This project supports installing local plugin bundles, mutating plugin config fr
 
 Plugin config is stored in `~/.agent/config.yaml` under `plugins.<name>.config`.
 
+Plugin source configuration is stored under `pluginSources` in the same config file.
+
 If you want the conceptual overview first, start with:
 
 - `docs/building-plugins.md`
@@ -17,6 +19,7 @@ If you want the conceptual overview first, start with:
 
 ```bash
 go run ./cmd/agent plugins list
+go run ./cmd/agent plugins search email
 go run ./cmd/agent plugins show send-email
 go run ./cmd/agent plugins validate ../agent-plugins/send-email
 go run ./cmd/agent plugins config send-email
@@ -31,6 +34,32 @@ Use `--link` while developing so the installed plugin points at your local check
 go run ./cmd/agent plugins install ../agent-plugins/send-email --link
 go run ./cmd/agent plugins install ../agent-plugins/web-research --link
 ```
+
+Local path installs are always supported, even if no plugin sources are configured.
+
+## Configure plugin sources
+
+Today, configurable plugin sources support local filesystem directories for active search/install.
+Registry sources can also be configured now, but remote registry search/install is not implemented yet.
+
+Example:
+
+```bash
+go run ./cmd/agent plugins sources add local-dev ../agent-plugins
+go run ./cmd/agent plugins sources list
+go run ./cmd/agent plugins search web
+go run ./cmd/agent plugins install send-email --link
+```
+
+You can also record a future registry source now:
+
+```bash
+go run ./cmd/agent plugins sources add official https://plugins.example.com --type registry
+```
+
+This lets you install by plugin name from a configured source directory instead of always passing a full path.
+
+Remote registry-style sources are part of the longer-term Phase 1 package plan. The contract is documented in `../agent-registry/docs/plugin-registry-contract.md`.
 
 ## Set plugin config from the CLI
 

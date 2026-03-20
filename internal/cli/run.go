@@ -363,6 +363,30 @@ func runPlugins(ctx context.Context, app service.App, args []string) error {
 			fmt.Printf("%s\t%s\t%s/%s\tenabled=%t\t%s\n", p.Manifest.Metadata.Name, p.Manifest.Metadata.Version, p.Manifest.Spec.Category, p.Manifest.Spec.Runtime.Type, p.Reference.Enabled, p.Reference.Path)
 		}
 		return nil
+	case "search":
+		query := ""
+		if len(args) > 1 {
+			query = strings.Join(args[1:], " ")
+		}
+		matches, err := internalplugin.SearchSources(query, app.Config.PluginSources)
+		if err != nil {
+			return err
+		}
+		if len(matches) == 0 {
+			fmt.Println("no plugins found")
+			return nil
+		}
+		for _, match := range matches {
+			fmt.Printf("%s\t%s\t%s/%s\t%s\t%s\n",
+				match.Manifest.Metadata.Name,
+				match.Manifest.Metadata.Version,
+				match.Manifest.Spec.Category,
+				match.Manifest.Spec.Runtime.Type,
+				match.Source.Name,
+				match.Manifest.Metadata.Description,
+			)
+		}
+		return nil
 	case "show", "validate", "config", "validate-config":
 		if args[0] == "config" && len(args) >= 2 && (args[1] == "set" || args[1] == "unset") {
 			return runPluginConfigMutation(ctx, app, args[1:])
@@ -411,6 +435,8 @@ func runPlugins(ctx context.Context, app service.App, args []string) error {
 		return runPluginLifecycle(ctx, app, args)
 	case "remove":
 		return runPluginLifecycle(ctx, app, args)
+	case "sources":
+		return runPluginSources(app, args[1:])
 	default:
 		return fmt.Errorf("unknown plugins subcommand %q", args[0])
 	}
@@ -421,7 +447,7 @@ func runPluginLifecycle(ctx context.Context, app service.App, args []string) err
 	switch subcommand {
 	case "install":
 		if len(args) < 2 {
-			return errors.New("plugins install requires a source path")
+			return errors.New("plugins install requires a source path or plugin name")
 		}
 		link := false
 		source := ""
@@ -434,9 +460,9 @@ func runPluginLifecycle(ctx context.Context, app service.App, args []string) err
 			}
 		}
 		if source == "" {
-			return errors.New("plugins install requires a source path")
+			return errors.New("plugins install requires a source path or plugin name")
 		}
-		manifest, destination, err := internalplugin.InstallLocal(source, app.Paths.UserPluginsDir, link)
+		manifest, destination, err := internalplugin.Install(source, app.Config.PluginSources, app.Paths.UserPluginsDir, link)
 		if err != nil {
 			return err
 		}
@@ -490,6 +516,103 @@ func runPluginLifecycle(ctx context.Context, app service.App, args []string) err
 		return nil
 	default:
 		return fmt.Errorf("unsupported plugin lifecycle command %q", subcommand)
+	}
+}
+
+func runPluginSources(app service.App, args []string) error {
+	if len(args) == 0 || args[0] == "list" {
+		if len(app.Config.PluginSources) == 0 {
+			fmt.Println("no plugin sources configured")
+			return nil
+		}
+		for _, source := range app.Config.PluginSources {
+			typeName := source.Type
+			if typeName == "" {
+				typeName = "filesystem"
+			}
+			location := source.Path
+			if location == "" {
+				location = source.URL
+			}
+			fmt.Printf("%s\t%s\tenabled=%t\t%s\n", source.Name, typeName, source.Enabled, location)
+		}
+		return nil
+	}
+	cfg, err := config.Load(app.Paths)
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "add":
+		if len(args) < 3 {
+			return errors.New("plugins sources add requires <name> <path-or-url>")
+		}
+		typeName := "filesystem"
+		name := ""
+		location := ""
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--type":
+				if i+1 >= len(args) {
+					return errors.New("--type requires a value")
+				}
+				typeName = args[i+1]
+				i++
+			default:
+				if name == "" {
+					name = args[i]
+				} else if location == "" {
+					location = args[i]
+				} else {
+					return fmt.Errorf("unexpected plugin source argument %q", args[i])
+				}
+			}
+		}
+		if name == "" || location == "" {
+			return errors.New("plugins sources add requires <name> <path-or-url>")
+		}
+		source := config.PluginSource{Name: name, Type: typeName, Enabled: true}
+		if typeName == "" {
+			if strings.HasPrefix(location, "http://") || strings.HasPrefix(location, "https://") {
+				typeName = "registry"
+			} else {
+				typeName = "filesystem"
+			}
+		}
+		switch typeName {
+		case "filesystem":
+			absPath, err := filepath.Abs(location)
+			if err != nil {
+				return err
+			}
+			source.Type = "filesystem"
+			source.Path = absPath
+		case "registry", "http", "https":
+			source.Type = "registry"
+			source.URL = location
+		default:
+			return fmt.Errorf("unsupported plugin source type %q", typeName)
+		}
+		cfg.SetPluginSource(source)
+		if err := config.Save(app.Paths, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("add-source\t%s\t%s\n", source.Name, source.Path+source.URL)
+		return nil
+	case "remove":
+		if len(args) < 2 {
+			return errors.New("plugins sources remove requires <name>")
+		}
+		if !cfg.RemovePluginSource(args[1]) {
+			return fmt.Errorf("plugin source %q not found", args[1])
+		}
+		if err := config.Save(app.Paths, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("remove-source\t%s\n", args[1])
+		return nil
+	default:
+		return fmt.Errorf("unknown plugins sources subcommand %q", args[0])
 	}
 }
 
@@ -578,6 +701,22 @@ func runConfig(app service.App, args []string) error {
 			strings.Join(app.Config.EnabledPlugins, ", "),
 			app.Config.ApprovalMode,
 		)
+		if len(app.Config.PluginSources) == 0 {
+			fmt.Println("plugin_sources: none")
+		} else {
+			fmt.Println("plugin_sources:")
+			for _, source := range app.Config.PluginSources {
+				typeName := source.Type
+				if typeName == "" {
+					typeName = "filesystem"
+				}
+				location := source.Path
+				if location == "" {
+					location = source.URL
+				}
+				fmt.Printf("  - %s (%s, enabled=%t): %s\n", source.Name, typeName, source.Enabled, location)
+			}
+		}
 		return nil
 	case "paths":
 		fmt.Printf("cwd: %s\nconfig_dir: %s\nconfig_file: %s\nlocal_profiles: %s\nuser_profiles: %s\nlocal_plugins: %s\nuser_plugins: %s\nsessions: %s\n",
@@ -759,13 +898,17 @@ func printUsage() {
 	fmt.Println("  profiles show <ref>     Show one profile")
 	fmt.Println("  profiles validate <ref> Validate one profile")
 	fmt.Println("  plugins list            List discoverable plugins")
+	fmt.Println("  plugins search [query]  Search configured plugin sources")
 	fmt.Println("  plugins show <ref>      Show one plugin")
 	fmt.Println("  plugins validate <ref>  Validate one plugin")
 	fmt.Println("  plugins config <name>   Show one plugin config")
 	fmt.Println("  plugins config set <plugin> <key> <value>  Set plugin config")
 	fmt.Println("  plugins config unset <plugin> <key>        Unset plugin config")
 	fmt.Println("  plugins validate-config <name> Validate one plugin config")
-	fmt.Println("  plugins install <path>  Install a local plugin bundle")
+	fmt.Println("  plugins sources list    List configured plugin sources")
+	fmt.Println("  plugins sources add <name> <path-or-url> [--type filesystem|registry]  Add a plugin source")
+	fmt.Println("  plugins sources remove <name>  Remove a plugin source")
+	fmt.Println("  plugins install <path-or-name> Install a local plugin bundle or a named plugin from configured sources")
 	fmt.Println("  plugins enable <name>   Enable an installed plugin")
 	fmt.Println("  plugins disable <name>  Disable an installed plugin")
 	fmt.Println("  plugins remove <name>   Remove a user-installed plugin")

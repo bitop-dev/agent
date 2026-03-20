@@ -26,6 +26,15 @@ type Config struct {
 	ApprovalMode   string                    `yaml:"approvalMode"`
 	Providers      map[string]ProviderConfig `yaml:"providers"`
 	Plugins        map[string]PluginConfig   `yaml:"plugins"`
+	PluginSources  []PluginSource            `yaml:"pluginSources,omitempty"`
+}
+
+type PluginSource struct {
+	Name    string `yaml:"name"`
+	Type    string `yaml:"type,omitempty"`
+	Path    string `yaml:"path,omitempty"`
+	URL     string `yaml:"url,omitempty"`
+	Enabled bool   `yaml:"enabled,omitempty"`
 }
 
 type ProviderConfig struct {
@@ -181,4 +190,25 @@ func (c *Config) RemovePlugin(name string) {
 		}
 	}
 	c.EnabledPlugins = filtered
+}
+
+func (c *Config) SetPluginSource(source PluginSource) {
+	for i, existing := range c.PluginSources {
+		if existing.Name == source.Name {
+			c.PluginSources[i] = source
+			return
+		}
+	}
+	c.PluginSources = append(c.PluginSources, source)
+}
+
+func (c *Config) RemovePluginSource(name string) bool {
+	for i, existing := range c.PluginSources {
+		if existing.Name != name {
+			continue
+		}
+		c.PluginSources = append(c.PluginSources[:i], c.PluginSources[i+1:]...)
+		return true
+	}
+	return false
 }

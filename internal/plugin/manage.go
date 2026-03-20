@@ -6,13 +6,26 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	loaderutil "github.com/ncecere/agent/internal/loader"
+	"github.com/ncecere/agent/pkg/config"
 	plg "github.com/ncecere/agent/pkg/plugin"
 )
 
+type SourceMatch struct {
+	Source   config.PluginSource
+	Manifest plg.Manifest
+	Path     string
+}
+
 func InstallLocal(source, destinationRoot string, link bool) (plg.Manifest, string, error) {
-	manifestPath, sourceDir, err := resolveSource(source)
+	return Install(source, nil, destinationRoot, link)
+}
+
+func Install(source string, sources []config.PluginSource, destinationRoot string, link bool) (plg.Manifest, string, error) {
+	manifestPath, sourceDir, err := resolveSource(source, sources)
 	if err != nil {
 		return plg.Manifest{}, "", err
 	}
@@ -44,6 +57,71 @@ func InstallLocal(source, destinationRoot string, link bool) (plg.Manifest, stri
 	return manifest, destinationDir, nil
 }
 
+func SearchSources(query string, sources []config.PluginSource) ([]SourceMatch, error) {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	var matches []SourceMatch
+	seen := make(map[string]struct{})
+	registrySources := 0
+	for _, source := range sources {
+		if !source.Enabled {
+			continue
+		}
+		typeName := source.Type
+		if typeName == "" {
+			typeName = "filesystem"
+		}
+		if typeName == "registry" {
+			registrySources++
+			continue
+		}
+		if typeName != "filesystem" || strings.TrimSpace(source.Path) == "" {
+			continue
+		}
+		entries, err := os.ReadDir(source.Path)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			pluginDir := filepath.Join(source.Path, entry.Name())
+			manifestPath, _, err := resolveSource(pluginDir, nil)
+			if err != nil {
+				continue
+			}
+			manifest, err := loaderutil.LoadYAML[plg.Manifest](manifestPath)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := seen[manifest.Metadata.Name]; ok {
+				continue
+			}
+			haystack := strings.ToLower(strings.Join([]string{
+				manifest.Metadata.Name,
+				manifest.Metadata.Description,
+				string(manifest.Spec.Category),
+				string(manifest.Spec.Runtime.Type),
+			}, " "))
+			if needle != "" && !strings.Contains(haystack, needle) {
+				continue
+			}
+			seen[manifest.Metadata.Name] = struct{}{}
+			matches = append(matches, SourceMatch{Source: source, Manifest: manifest, Path: pluginDir})
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].Manifest.Metadata.Name == matches[j].Manifest.Metadata.Name {
+			return matches[i].Source.Name < matches[j].Source.Name
+		}
+		return matches[i].Manifest.Metadata.Name < matches[j].Manifest.Metadata.Name
+	})
+	if len(matches) == 0 && registrySources > 0 && needle != "" {
+		return nil, fmt.Errorf("no local matches found; registry search is not implemented yet")
+	}
+	return matches, nil
+}
+
 func RemoveInstalled(name, destinationRoot string) (string, error) {
 	destinationDir := filepath.Join(destinationRoot, name)
 	if _, err := os.Lstat(destinationDir); err != nil {
@@ -58,16 +136,16 @@ func RemoveInstalled(name, destinationRoot string) (string, error) {
 	return destinationDir, nil
 }
 
-func resolveSource(source string) (manifestPath string, sourceDir string, err error) {
+func resolveSource(source string, sources []config.PluginSource) (manifestPath string, sourceDir string, err error) {
 	absSource, err := filepath.Abs(source)
 	if err != nil {
 		return "", "", err
 	}
-	source = absSource
-	info, err := os.Stat(source)
+	info, err := os.Stat(absSource)
 	if err != nil {
-		return "", "", err
+		return resolveFromSources(source, sources)
 	}
+	source = absSource
 	if info.IsDir() {
 		for _, candidate := range []string{"plugin.yaml", "plugin.yml"} {
 			manifestPath = filepath.Join(source, candidate)
@@ -82,6 +160,46 @@ func resolveSource(source string) (manifestPath string, sourceDir string, err er
 		return "", "", fmt.Errorf("plugin source must be a directory or plugin manifest")
 	}
 	return source, filepath.Dir(source), nil
+}
+
+func resolveFromSources(ref string, sources []config.PluginSource) (manifestPath string, sourceDir string, err error) {
+	var checked []string
+	hasRegistry := false
+	for _, source := range sources {
+		if !source.Enabled {
+			continue
+		}
+		typeName := source.Type
+		if typeName == "" {
+			typeName = "filesystem"
+		}
+		switch typeName {
+		case "filesystem":
+			if source.Path == "" {
+				continue
+			}
+			candidateDir := filepath.Join(source.Path, ref)
+			checked = append(checked, candidateDir)
+			for _, candidate := range []string{"plugin.yaml", "plugin.yml"} {
+				candidateManifest := filepath.Join(candidateDir, candidate)
+				if _, statErr := os.Stat(candidateManifest); statErr == nil {
+					return candidateManifest, candidateDir, nil
+				}
+			}
+		case "registry":
+			hasRegistry = true
+		}
+	}
+	if len(checked) == 0 {
+		if hasRegistry {
+			return "", "", fmt.Errorf("plugin %q was not found locally; registry installs are not implemented yet", ref)
+		}
+		return "", "", fmt.Errorf("plugin source %q not found; pass a local path or configure plugin sources", ref)
+	}
+	if hasRegistry {
+		return "", "", fmt.Errorf("plugin %q not found in configured filesystem sources: %s (registry install not implemented yet)", ref, checked)
+	}
+	return "", "", fmt.Errorf("plugin %q not found in configured sources: %s", ref, checked)
 }
 
 func copyDir(sourceDir, destinationDir string) error {

@@ -151,6 +151,11 @@ Support and document:
 
 - `plugins install ../agent-plugins/send-email --link`
 
+Also support configurable local source directories so users can install by name:
+
+- `plugins sources add local-dev ../agent-plugins`
+- `plugins install send-email --link`
+
 ### Phase 2: named package installs
 
 Add a package index so users can do something like:
@@ -197,3 +202,7 @@ When a runtime becomes the real shipped implementation of a plugin package, then
 3. define a package naming/versioning scheme
 4. design `plugins search`, `plugins install <name>`, and `plugins publish`
 5. add trust and signature rules before enabling remote installs by default
+
+See also `../agent-registry/docs/plugin-registry-contract.md` for the proposed registry source and index format.
+
+For the registry server implementation plan itself, see `../agent-registry/docs/plugin-registry-server-plan.md`.
