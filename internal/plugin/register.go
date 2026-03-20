@@ -251,10 +251,12 @@ func (t DescriptorTool) runHost(ctx context.Context, call tool.Call) (tool.Resul
 		if mt, ok := call.Arguments["maxTurns"].(float64); ok && mt > 0 {
 			maxTurns = int(mt)
 		}
+		handoffCtx, _ := call.Arguments["context"].(map[string]any)
 		result, err := t.HostCaps.SpawnSubRun(ctx, pkghost.SubRunRequest{
 			Task:     task,
 			Profile:  profile,
 			MaxTurns: maxTurns,
+			Context:  handoffCtx,
 		})
 		if err != nil {
 			return tool.Result{}, err
@@ -282,10 +284,12 @@ func (t DescriptorTool) runHost(ctx context.Context, call tool.Call) (tool.Resul
 			if mt, ok := taskMap["maxTurns"].(float64); ok && mt > 0 {
 				maxTurns = int(mt)
 			}
+			handoffCtx, _ := taskMap["context"].(map[string]any)
 			reqs = append(reqs, pkghost.SubRunRequest{
 				Task:     task,
 				Profile:  profile,
 				MaxTurns: maxTurns,
+				Context:  handoffCtx,
 			})
 		}
 		results, errs := t.HostCaps.SpawnSubRunParallel(ctx, reqs)

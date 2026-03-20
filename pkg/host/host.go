@@ -37,6 +37,7 @@ type SubRunRequest struct {
 	Profile      string
 	MaxTurns     int
 	AllowedTools []string
+	Context      map[string]any // structured context passed from parent to child
 }
 
 type SubRunResult struct {

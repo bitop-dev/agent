@@ -59,6 +59,28 @@ func (s subAgentSink) Publish(ctx context.Context, event events.Event) error {
 	return s.parent.Publish(ctx, event)
 }
 
+// formatHandoffContext converts a structured context map into a labeled text block
+// that gets prepended to the sub-agent's prompt.
+func formatHandoffContext(ctx map[string]any) string {
+	var lines []string
+	lines = append(lines, "[Context from parent agent]")
+	for k, v := range ctx {
+		switch val := v.(type) {
+		case string:
+			lines = append(lines, fmt.Sprintf("%s: %s", k, val))
+		case []any:
+			items := make([]string, 0, len(val))
+			for _, item := range val {
+				items = append(items, fmt.Sprint(item))
+			}
+			lines = append(lines, fmt.Sprintf("%s: %s", k, strings.Join(items, ", ")))
+		default:
+			lines = append(lines, fmt.Sprintf("%s: %v", k, v))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func truncateForDisplay(s string, max int) string {
 	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
 	if len(s) <= max {
@@ -121,8 +143,14 @@ func (c *RuntimeCapabilities) SpawnSubRun(ctx context.Context, req pkghost.SubRu
 	// Forward sub-agent events to the parent so progress is visible.
 	eventSink := subAgentSink{parent: c.Events, prefix: fmt.Sprintf("[sub:%s]", profileRef)}
 	runner := internalruntime.Runner{}
+	// Build the prompt: inject structured context before the task if provided.
+	prompt := req.Task
+	if len(req.Context) > 0 {
+		prompt = formatHandoffContext(req.Context) + "\n\n" + req.Task
+	}
+
 	runReq := pkgruntime.RunRequest{
-		Prompt:       req.Task,
+		Prompt:       prompt,
 		SystemPrompt: loadSystemPrompt(profilePath, manifest.Spec.Instructions.System, c.Prompts),
 		Profile:      manifest,
 		Provider:     providerImpl,
