@@ -59,20 +59,26 @@ func (p Provider) Stream(ctx context.Context, req provider.CompletionRequest) (<
 }
 
 func (p Provider) runChat(ctx context.Context, req provider.CompletionRequest, ch chan<- provider.StreamEvent) error {
+	nameMap := buildToolNameMap(req.Tools)
+	tools := toChatTools(req.Tools)
+	toolChoice := ""
+	if len(tools) > 0 {
+		toolChoice = "auto"
+	}
 	body := chatRequest{
 		Model:      req.Model.Model,
 		Messages:   toChatMessages(req),
-		Tools:      toChatTools(req.Tools),
-		ToolChoice: "auto",
+		Tools:      tools,
+		ToolChoice: toolChoice,
 		Stream:     true,
 	}
 	if strings.TrimSpace(req.System) != "" {
 		body.Messages = append([]chatMessage{{Role: "system", Content: req.System}}, body.Messages...)
 	}
-	return p.streamChat(ctx, body, ch)
+	return p.streamChat(ctx, body, nameMap, ch)
 }
 
-func (p Provider) streamChat(ctx context.Context, body chatRequest, ch chan<- provider.StreamEvent) error {
+func (p Provider) streamChat(ctx context.Context, body chatRequest, nameMap map[string]string, ch chan<- provider.StreamEvent) error {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -127,7 +133,7 @@ func (p Provider) streamChat(ctx context.Context, body chatRequest, ch chan<- pr
 			if parseErr != nil {
 				return fmt.Errorf("parse tool call %s arguments: %w", call.Function.Name, parseErr)
 			}
-			ch <- provider.StreamEvent{Type: provider.StreamEventToolCall, ToolCall: tool.Call{ID: call.ID, ToolID: call.Function.Name, Arguments: args}}
+			ch <- provider.StreamEvent{Type: provider.StreamEventToolCall, ToolCall: tool.Call{ID: call.ID, ToolID: restoreToolID(call.Function.Name, nameMap), Arguments: args}}
 		}
 		if strings.TrimSpace(message.Content) != "" {
 			ch <- provider.StreamEvent{Type: provider.StreamEventText, Text: message.Content}
@@ -183,12 +189,13 @@ func (p Provider) streamChat(ctx context.Context, body chatRequest, ch chan<- pr
 		if err != nil {
 			return fmt.Errorf("parse tool call %s arguments: %w", accum.name, err)
 		}
-		ch <- provider.StreamEvent{Type: provider.StreamEventToolCall, ToolCall: tool.Call{ID: accum.id, ToolID: accum.name, Arguments: args}}
+		ch <- provider.StreamEvent{Type: provider.StreamEventToolCall, ToolCall: tool.Call{ID: accum.id, ToolID: restoreToolID(accum.name, nameMap), Arguments: args}}
 	}
 	return nil
 }
 
 func (p Provider) runResponses(ctx context.Context, req provider.CompletionRequest, ch chan<- provider.StreamEvent) error {
+	nameMap := buildToolNameMap(req.Tools)
 	body := responsesRequest{
 		Model:        req.Model.Model,
 		Instructions: req.System,
@@ -212,7 +219,7 @@ func (p Provider) runResponses(ctx context.Context, req provider.CompletionReque
 			if err != nil {
 				return fmt.Errorf("parse tool call %s arguments: %w", item.Name, err)
 			}
-			ch <- provider.StreamEvent{Type: provider.StreamEventToolCall, ToolCall: tool.Call{ID: item.CallID, ToolID: item.Name, Arguments: args}}
+			ch <- provider.StreamEvent{Type: provider.StreamEventToolCall, ToolCall: tool.Call{ID: item.CallID, ToolID: restoreToolID(item.Name, nameMap), Arguments: args}}
 		case "message":
 			for _, content := range item.Content {
 				if strings.TrimSpace(content.Text) != "" {
@@ -271,6 +278,43 @@ func normalizeMode(mode string) string {
 	}
 }
 
+// sanitizeToolName replaces characters not accepted by strict API backends
+// (Bedrock enforces [a-zA-Z0-9_-]+, Azure enforces [a-zA-Z0-9_.-]+) with
+// underscores. This lets tool IDs like "py/word-count" or "email/draft" pass
+// validation on every backend without changing the internal tool registry.
+func sanitizeToolName(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
+// buildToolNameMap returns a mapping of sanitized-name → original-tool-ID built
+// from the supplied tool definitions. Used to reverse-map tool call names that
+// come back from the API to the original IDs the runtime understands.
+func buildToolNameMap(defs []tool.Definition) map[string]string {
+	m := make(map[string]string, len(defs))
+	for _, def := range defs {
+		m[sanitizeToolName(def.ID)] = def.ID
+	}
+	return m
+}
+
+// restoreToolID looks up the original tool ID for a sanitized name returned by
+// the API. Falls back to the sanitized name if no mapping is found.
+func restoreToolID(sanitized string, nameMap map[string]string) string {
+	if original, ok := nameMap[sanitized]; ok {
+		return original
+	}
+	return sanitized
+}
+
 func parseArguments(input string) (map[string]any, error) {
 	if strings.TrimSpace(input) == "" {
 		return map[string]any{}, nil
@@ -294,7 +338,7 @@ func toChatMessages(req provider.CompletionRequest) []chatMessage {
 					ID:   call.ID,
 					Type: "function",
 					Function: chatToolCallFunction{
-						Name:      call.ToolID,
+						Name:      sanitizeToolName(call.ToolID),
 						Arguments: mustJSON(call.Arguments),
 					},
 				})
@@ -337,7 +381,7 @@ func toChatTools(defs []tool.Definition) []chatTool {
 		tools = append(tools, chatTool{
 			Type: "function",
 			Function: chatFunction{
-				Name:        def.ID,
+				Name:        sanitizeToolName(def.ID),
 				Description: def.Description,
 				Parameters:  schemaOrObject(def.Schema),
 			},
@@ -351,7 +395,7 @@ func toResponsesTools(defs []tool.Definition) []responsesTool {
 	for _, def := range defs {
 		tools = append(tools, responsesTool{
 			Type:        "function",
-			Name:        def.ID,
+			Name:        sanitizeToolName(def.ID),
 			Description: def.Description,
 			Parameters:  schemaOrObject(def.Schema),
 		})
