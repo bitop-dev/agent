@@ -1,64 +1,140 @@
 package plugin
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	loaderutil "github.com/ncecere/agent/internal/loader"
 	"github.com/ncecere/agent/pkg/config"
 	plg "github.com/ncecere/agent/pkg/plugin"
 )
 
+// SourceMatch is a search result entry pairing a source with a discovered plugin.
 type SourceMatch struct {
 	Source   config.PluginSource
 	Manifest plg.Manifest
 	Path     string
 }
 
-func InstallLocal(source, destinationRoot string, link bool) (plg.Manifest, string, error) {
-	return Install(source, nil, destinationRoot, link)
+// InstallResult contains the outcome of a successful plugin install.
+type InstallResult struct {
+	Manifest    plg.Manifest
+	Destination string
+	Version     string
+	Source      string // "local" for path installs, or the configured source name
 }
 
-func Install(source string, sources []config.PluginSource, destinationRoot string, link bool) (plg.Manifest, string, error) {
-	manifestPath, sourceDir, err := resolveSource(source, sources)
+// InstallOptions controls how an install is resolved.
+type InstallOptions struct {
+	Link         bool   // symlink instead of copy (local installs only)
+	SourceFilter string // if non-empty, only consider this source name
+}
+
+func InstallLocal(source, destinationRoot string, link bool) (InstallResult, error) {
+	return Install(source, nil, destinationRoot, InstallOptions{Link: link})
+}
+
+func Install(source string, sources []config.PluginSource, destinationRoot string, opts InstallOptions) (InstallResult, error) {
+	// Filter sources if --source was specified
+	filtered := sources
+	if opts.SourceFilter != "" {
+		filtered = nil
+		for _, s := range sources {
+			if s.Name == opts.SourceFilter {
+				filtered = append(filtered, s)
+				break
+			}
+		}
+		if len(filtered) == 0 {
+			return InstallResult{}, fmt.Errorf("source %q not found in configured sources", opts.SourceFilter)
+		}
+	}
+
+	manifestPath, sourceDir, err := resolveSource(source, filtered)
 	if err != nil {
 		// Local resolution failed. Try registry sources before giving up.
-		if manifest, dest, regErr := installFromRegistry(source, sources, destinationRoot); regErr == nil {
-			return manifest, dest, nil
+		if result, regErr := installFromRegistry(source, filtered, destinationRoot); regErr == nil {
+			return result, nil
 		}
-		return plg.Manifest{}, "", err
+		return InstallResult{}, err
 	}
 	manifest, err := loaderutil.LoadYAML[plg.Manifest](manifestPath)
 	if err != nil {
-		return plg.Manifest{}, "", err
+		return InstallResult{}, err
 	}
 	if err := ValidateManifest(manifest); err != nil {
-		return plg.Manifest{}, "", err
+		return InstallResult{}, err
 	}
 	if err := os.MkdirAll(destinationRoot, 0o755); err != nil {
-		return plg.Manifest{}, "", err
+		return InstallResult{}, err
 	}
 	destinationDir := filepath.Join(destinationRoot, manifest.Metadata.Name)
 	if _, err := os.Lstat(destinationDir); err == nil {
-		return plg.Manifest{}, "", fmt.Errorf("plugin %s already installed at %s", manifest.Metadata.Name, destinationDir)
+		return InstallResult{}, fmt.Errorf("plugin %s already installed at %s", manifest.Metadata.Name, destinationDir)
 	} else if !os.IsNotExist(err) {
-		return plg.Manifest{}, "", err
+		return InstallResult{}, err
 	}
-	if link {
+	if opts.Link {
 		if err := os.Symlink(sourceDir, destinationDir); err != nil {
-			return plg.Manifest{}, "", err
+			return InstallResult{}, err
 		}
 	} else {
 		if err := copyDir(sourceDir, destinationDir); err != nil {
-			return plg.Manifest{}, "", err
+			return InstallResult{}, err
 		}
 	}
-	return manifest, destinationDir, nil
+	// Determine the source name for record-keeping.
+	sourceName := "local"
+	for _, s := range filtered {
+		if s.Type == "filesystem" && strings.HasPrefix(filepath.Clean(sourceDir), filepath.Clean(s.Path)) {
+			sourceName = s.Name
+			break
+		}
+	}
+	return InstallResult{
+		Manifest:    manifest,
+		Destination: destinationDir,
+		Version:     manifest.Metadata.Version,
+		Source:      sourceName,
+	}, nil
+}
+
+// Upgrade removes the currently installed version of a plugin and reinstalls
+// it from its recorded source (or any configured source if the source is gone).
+func Upgrade(name string, sources []config.PluginSource, cfg config.Config, destinationRoot string) (InstallResult, error) {
+	currentCfg := cfg.Plugins[name]
+	sourceFilter := currentCfg.InstalledSource
+	if sourceFilter == "local" {
+		return InstallResult{}, fmt.Errorf("plugin %q was installed from a local path — use plugins install <path> to reinstall", name)
+	}
+
+	// Check registry for the latest version before removing current install.
+	result, err := installFromRegistry(name, sources, destinationRoot+".upgrade-tmp")
+	if err != nil {
+		return InstallResult{}, fmt.Errorf("could not fetch upgrade for %q: %w", name, err)
+	}
+	// Clean up temp dir used during version check.
+	os.RemoveAll(result.Destination)
+
+	if result.Version == currentCfg.InstalledVersion {
+		return InstallResult{}, fmt.Errorf("plugin %q is already at the latest version (%s)", name, result.Version)
+	}
+
+	// Remove current install and reinstall.
+	if _, err := RemoveInstalled(name, destinationRoot); err != nil {
+		return InstallResult{}, fmt.Errorf("remove current install: %w", err)
+	}
+	return Install(name, sources, destinationRoot, InstallOptions{SourceFilter: sourceFilter})
 }
 
 func SearchSources(query string, sources []config.PluginSource) ([]SourceMatch, error) {
@@ -240,4 +316,157 @@ func copyFile(sourcePath, destinationPath string) error {
 		return err
 	}
 	return target.Chmod(0o644)
+}
+
+// PublishResult contains the outcome of a successful publish operation.
+type PublishResult struct {
+	Name    string
+	Version string
+	Source  string
+}
+
+// Publish packs a plugin directory into a .tar.gz and POSTs it to a registry source.
+// The source must be of type "registry" and have a publishToken configured.
+func Publish(pluginPath string, sources []config.PluginSource, sourceFilter string) (PublishResult, error) {
+	absPath, err := filepath.Abs(pluginPath)
+	if err != nil {
+		return PublishResult{}, err
+	}
+
+	// Load and validate the manifest.
+	manifestPath := filepath.Join(absPath, "plugin.yaml")
+	if _, err := os.Stat(manifestPath); err != nil {
+		return PublishResult{}, fmt.Errorf("no plugin.yaml found in %s", absPath)
+	}
+	manifest, err := loaderutil.LoadYAML[plg.Manifest](manifestPath)
+	if err != nil {
+		return PublishResult{}, fmt.Errorf("load manifest: %w", err)
+	}
+	if err := ValidateManifest(manifest); err != nil {
+		return PublishResult{}, err
+	}
+
+	// Find the target registry source.
+	var target *config.PluginSource
+	for i, s := range sources {
+		if s.Type != "registry" || !s.Enabled {
+			continue
+		}
+		if sourceFilter != "" && s.Name != sourceFilter {
+			continue
+		}
+		if s.PublishToken == "" {
+			continue
+		}
+		target = &sources[i]
+		break
+	}
+	if target == nil {
+		if sourceFilter != "" {
+			return PublishResult{}, fmt.Errorf("no publishable registry source named %q — check that it exists, is enabled, and has a publishToken configured", sourceFilter)
+		}
+		return PublishResult{}, fmt.Errorf("no publishable registry source found — add a registry source with a publishToken")
+	}
+
+	// Build the tarball in memory.
+	tarball, err := packPlugin(absPath, manifest.Metadata.Name)
+	if err != nil {
+		return PublishResult{}, fmt.Errorf("pack plugin: %w", err)
+	}
+
+	// POST to registry.
+	registryURL := strings.TrimRight(target.URL, "/") + "/v1/packages"
+	req, err := http.NewRequest(http.MethodPost, registryURL, bytes.NewReader(tarball))
+	if err != nil {
+		return PublishResult{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+target.PublishToken)
+	req.Header.Set("Content-Type", "application/gzip")
+
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return PublishResult{}, fmt.Errorf("publish to %s: %w", target.URL, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		return PublishResult{}, fmt.Errorf("registry returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	return PublishResult{
+		Name:    manifest.Metadata.Name,
+		Version: manifest.Metadata.Version,
+		Source:  target.Name,
+	}, nil
+}
+
+// packPlugin builds a .tar.gz of a plugin directory with <name>/ as the top-level directory.
+func packPlugin(dir, name string) ([]byte, error) {
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+
+	skipNames := map[string]bool{".git": true, "node_modules": true, ".DS_Store": true}
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if skipNames[d.Name()] {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() && strings.HasPrefix(d.Name(), ".") {
+			return filepath.SkipDir
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(filepath.Join(name, rel))
+		hdr.ModTime = time.Unix(0, 0)
+		hdr.AccessTime = time.Unix(0, 0)
+		hdr.ChangeTime = time.Unix(0, 0)
+		hdr.Uid, hdr.Gid = 0, 0
+		if d.IsDir() && !strings.HasSuffix(hdr.Name, "/") {
+			hdr.Name += "/"
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(tw, f)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+	if err := gzw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

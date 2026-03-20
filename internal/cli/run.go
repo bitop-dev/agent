@@ -361,7 +361,16 @@ func runPlugins(ctx context.Context, app service.App, args []string) error {
 			return err
 		}
 		for _, p := range plugins {
-			fmt.Printf("%s\t%s\t%s/%s\tenabled=%t\t%s\n", p.Manifest.Metadata.Name, p.Manifest.Metadata.Version, p.Manifest.Spec.Category, p.Manifest.Spec.Runtime.Type, p.Reference.Enabled, p.Reference.Path)
+			name := p.Manifest.Metadata.Name
+			installed := app.Config.Plugins[name]
+			srcInfo := ""
+			if installed.InstalledSource != "" {
+				srcInfo = fmt.Sprintf("\tsource=%s", installed.InstalledSource)
+			}
+			fmt.Printf("%s\t%s\t%s/%s\tenabled=%t%s\t%s\n",
+				name, p.Manifest.Metadata.Version,
+				p.Manifest.Spec.Category, p.Manifest.Spec.Runtime.Type,
+				p.Reference.Enabled, srcInfo, p.Reference.Path)
 		}
 		return nil
 	case "search":
@@ -432,7 +441,7 @@ func runPlugins(ctx context.Context, app service.App, args []string) error {
 			len(manifest.Spec.Contributes.Policies),
 		)
 		return nil
-	case "install", "enable", "disable":
+	case "install", "upgrade", "enable", "disable", "publish":
 		return runPluginLifecycle(ctx, app, args)
 	case "remove":
 		return runPluginLifecycle(ctx, app, args)
@@ -451,11 +460,18 @@ func runPluginLifecycle(ctx context.Context, app service.App, args []string) err
 			return errors.New("plugins install requires a source path or plugin name")
 		}
 		link := false
+		sourceFilter := ""
 		source := ""
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
 			case "--link":
 				link = true
+			case "--source":
+				if i+1 >= len(args) {
+					return errors.New("--source requires a value")
+				}
+				sourceFilter = args[i+1]
+				i++
 			default:
 				source = args[i]
 			}
@@ -463,11 +479,42 @@ func runPluginLifecycle(ctx context.Context, app service.App, args []string) err
 		if source == "" {
 			return errors.New("plugins install requires a source path or plugin name")
 		}
-		manifest, destination, err := internalplugin.Install(source, app.Config.PluginSources, app.Paths.UserPluginsDir, link)
+		result, err := internalplugin.Install(source, app.Config.PluginSources, app.Paths.UserPluginsDir,
+			internalplugin.InstallOptions{Link: link, SourceFilter: sourceFilter})
 		if err != nil {
 			return err
 		}
-		fmt.Printf("installed\t%s\t%s\n", manifest.Metadata.Name, destination)
+		// Record version and source in config.
+		cfg, err := config.Load(app.Paths)
+		if err != nil {
+			return err
+		}
+		cfg.SetPluginInstallRecord(result.Manifest.Metadata.Name, result.Version, result.Source)
+		if err := config.Save(app.Paths, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("installed\t%s@%s\t(source: %s)\t%s\n",
+			result.Manifest.Metadata.Name, result.Version, result.Source, result.Destination)
+		return nil
+
+	case "upgrade":
+		if len(args) < 2 {
+			return errors.New("plugins upgrade requires a plugin name")
+		}
+		name := args[1]
+		cfg, err := config.Load(app.Paths)
+		if err != nil {
+			return err
+		}
+		result, err := internalplugin.Upgrade(name, app.Config.PluginSources, cfg, app.Paths.UserPluginsDir)
+		if err != nil {
+			return err
+		}
+		cfg.SetPluginInstallRecord(name, result.Version, result.Source)
+		if err := config.Save(app.Paths, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("upgraded\t%s@%s\t(source: %s)\n", name, result.Version, result.Source)
 		return nil
 	case "enable", "disable":
 		if len(args) < 2 {
@@ -496,6 +543,34 @@ func runPluginLifecycle(ctx context.Context, app service.App, args []string) err
 		}
 		fmt.Printf("%s\t%s\n", subcommand, name)
 		return nil
+	case "publish":
+		if len(args) < 2 {
+			return errors.New("plugins publish requires a plugin path")
+		}
+		pluginPath := ""
+		sourceFilter := ""
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--registry":
+				if i+1 >= len(args) {
+					return errors.New("--registry requires a value")
+				}
+				sourceFilter = args[i+1]
+				i++
+			default:
+				pluginPath = args[i]
+			}
+		}
+		if pluginPath == "" {
+			return errors.New("plugins publish requires a plugin path")
+		}
+		result, err := internalplugin.Publish(pluginPath, app.Config.PluginSources, sourceFilter)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("published\t%s@%s\t(registry: %s)\n", result.Name, result.Version, result.Source)
+		return nil
+
 	case "remove":
 		if len(args) < 2 {
 			return errors.New("plugins remove requires a plugin name")
@@ -909,7 +984,9 @@ func printUsage() {
 	fmt.Println("  plugins sources list    List configured plugin sources")
 	fmt.Println("  plugins sources add <name> <path-or-url> [--type filesystem|registry]  Add a plugin source")
 	fmt.Println("  plugins sources remove <name>  Remove a plugin source")
-	fmt.Println("  plugins install <path-or-name> Install a local plugin bundle or a named plugin from configured sources")
+	fmt.Println("  plugins install <path-or-name> [--source <name>] [--link]  Install a plugin")
+	fmt.Println("  plugins upgrade <name>  Upgrade an installed plugin to the latest version")
+	fmt.Println("  plugins publish <path> [--registry <name>]  Publish a plugin to a registry")
 	fmt.Println("  plugins enable <name>   Enable an installed plugin")
 	fmt.Println("  plugins disable <name>  Disable an installed plugin")
 	fmt.Println("  plugins remove <name>   Remove a user-installed plugin")

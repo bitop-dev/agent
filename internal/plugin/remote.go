@@ -155,7 +155,7 @@ func entryToManifest(entry registryEntry) plg.Manifest {
 
 // installFromRegistry finds a package by name across enabled registry sources,
 // downloads and verifies the artifact, and extracts it to destinationRoot.
-func installFromRegistry(name string, sources []config.PluginSource, destinationRoot string) (plg.Manifest, string, error) {
+func installFromRegistry(name string, sources []config.PluginSource, destinationRoot string) (InstallResult, error) {
 	for _, source := range sources {
 		if !source.Enabled || source.Type != "registry" || strings.TrimSpace(source.URL) == "" {
 			continue
@@ -171,26 +171,31 @@ func installFromRegistry(name string, sources []config.PluginSource, destination
 		// Use the first (latest) version.
 		ver := meta.Versions[0]
 		if ver.Artifact.URL == "" {
-			return plg.Manifest{}, "", fmt.Errorf("registry package %q has no artifact URL", name)
+			return InstallResult{}, fmt.Errorf("registry package %q has no artifact URL", name)
 		}
 		destDir, err := downloadAndExtract(ver.Artifact.URL, ver.Artifact.SHA256, destinationRoot)
 		if err != nil {
-			return plg.Manifest{}, "", err
+			return InstallResult{}, err
 		}
 		// Load the real manifest from the extracted plugin directory.
 		manifest, path, err := findAndLoadManifest(destDir)
 		if err != nil {
 			os.RemoveAll(destDir)
-			return plg.Manifest{}, "", fmt.Errorf("loaded artifact for %q but could not read plugin.yaml: %w", name, err)
+			return InstallResult{}, fmt.Errorf("loaded artifact for %q but could not read plugin.yaml: %w", name, err)
 		}
 		_ = path
 		if err := ValidateManifest(manifest); err != nil {
 			os.RemoveAll(destDir)
-			return plg.Manifest{}, "", err
+			return InstallResult{}, err
 		}
-		return manifest, destDir, nil
+		return InstallResult{
+			Manifest:    manifest,
+			Destination: destDir,
+			Version:     manifest.Metadata.Version,
+			Source:      source.Name,
+		}, nil
 	}
-	return plg.Manifest{}, "", fmt.Errorf("plugin %q not found in any configured registry source", name)
+	return InstallResult{}, fmt.Errorf("plugin %q not found in any configured registry source", name)
 }
 
 // findAndLoadManifest finds plugin.yaml in a directory and loads it.
