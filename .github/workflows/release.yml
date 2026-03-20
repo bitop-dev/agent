@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/agent-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/agent
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            # Also build plugin binaries for linux (shipped in containers)
+            echo "Binary built: dist/agent-${{ matrix.goos }}-${{ matrix.goarch }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-linux-amd64
+          path: dist/amd64/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-linux-arm64
+          path: dist/arm64/
+
+      - name: Prepare binaries
+        run: |
+          chmod +x dist/amd64/agent-linux-amd64
+          chmod +x dist/arm64/agent-linux-arm64
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Flatten artifacts
+          mkdir -p release
+          for dir in dist/*/; do
+            cp "$dir"/* release/ 2>/dev/null || true
+          done
+          gh release create ${{ github.ref_name }} release/* \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
