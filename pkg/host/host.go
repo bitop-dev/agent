@@ -24,6 +24,7 @@ type PipelineStep struct {
 	Context    map[string]any `json:"context,omitempty"`    // structured context — values can use {{var}}
 	As         string         `json:"as,omitempty"`         // variable name to store this step's output
 	MaxTurns   int            `json:"maxTurns,omitempty"`   // 0 = default
+	Worker     string         `json:"worker,omitempty"`     // remote worker URL (e.g. http://worker:9898) — empty = run locally
 	Parallel   []PipelineStep `json:"parallel,omitempty"`   // run these steps concurrently instead of using agent
 	Checkpoint *Checkpoint    `json:"checkpoint,omitempty"` // pause for human review
 }

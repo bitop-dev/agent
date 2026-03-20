@@ -604,9 +604,10 @@ func parsePipelineSteps(raw []any) []pkghost.PipelineStep {
 			continue
 		}
 		step := pkghost.PipelineStep{
-			Agent: stringFromMap(m, "agent"),
-			Task:  stringFromMap(m, "task"),
-			As:    stringFromMap(m, "as"),
+			Agent:  stringFromMap(m, "agent"),
+			Task:   stringFromMap(m, "task"),
+			As:     stringFromMap(m, "as"),
+			Worker: stringFromMap(m, "worker"),
 		}
 		if mt, ok := m["maxTurns"].(float64); ok {
 			step.MaxTurns = int(mt)

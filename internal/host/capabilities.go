@@ -2,11 +2,14 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	internalpolicy "github.com/bitop-dev/agent/internal/policy"
 	profileloader "github.com/bitop-dev/agent/internal/profile"
@@ -255,16 +258,23 @@ func (c *RuntimeCapabilities) RunPipeline(ctx context.Context, steps []pkghost.P
 			continue
 		}
 
-		// Sequential step — run one agent.
+		// Sequential step — run one agent (locally or on a remote worker).
 		task := expandTemplate(step.Task, outputs)
 		stepCtx := expandContextMap(step.Context, outputs)
+		workerURL := expandTemplate(step.Worker, outputs)
 
-		result, err := c.SpawnSubRun(ctx, pkghost.SubRunRequest{
-			Task:     task,
-			Profile:  step.Agent,
-			MaxTurns: defaultMaxTurns(step.MaxTurns),
-			Context:  stepCtx,
-		})
+		var result pkghost.SubRunResult
+		var err error
+		if workerURL != "" {
+			result, err = dispatchToRemoteWorker(ctx, workerURL, step.Agent, task, stepCtx, step.MaxTurns)
+		} else {
+			result, err = c.SpawnSubRun(ctx, pkghost.SubRunRequest{
+				Task:     task,
+				Profile:  step.Agent,
+				MaxTurns: defaultMaxTurns(step.MaxTurns),
+				Context:  stepCtx,
+			})
+		}
 
 		sr := pkghost.PipelineStepResult{Agent: step.Agent, As: step.As}
 		if err != nil {
@@ -309,6 +319,53 @@ func expandContextMap(ctx map[string]any, outputs map[string]string) map[string]
 		}
 	}
 	return expanded
+}
+
+// dispatchToRemoteWorker sends a task to a remote agent worker via HTTP.
+func dispatchToRemoteWorker(ctx context.Context, workerURL, profile, task string, taskCtx map[string]any, maxTurns int) (pkghost.SubRunResult, error) {
+	reqBody := map[string]any{
+		"profile": profile,
+		"task":    task,
+	}
+	if len(taskCtx) > 0 {
+		reqBody["context"] = taskCtx
+	}
+	if maxTurns > 0 {
+		reqBody["maxTurns"] = maxTurns
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return pkghost.SubRunResult{}, err
+	}
+	url := strings.TrimRight(workerURL, "/") + "/v1/task"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(data)))
+	if err != nil {
+		return pkghost.SubRunResult{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return pkghost.SubRunResult{}, fmt.Errorf("remote worker %s: %w", workerURL, err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Status    string `json:"status"`
+		Output    string `json:"output"`
+		Error     string `json:"error"`
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return pkghost.SubRunResult{}, fmt.Errorf("remote worker %s: decode response: %w", workerURL, err)
+	}
+	if result.Status == "failed" || result.Error != "" {
+		return pkghost.SubRunResult{}, fmt.Errorf("remote worker %s: %s", workerURL, result.Error)
+	}
+	return pkghost.SubRunResult{
+		Output:    result.Output,
+		SessionID: result.SessionID,
+	}, nil
 }
 
 func defaultMaxTurns(n int) int {
