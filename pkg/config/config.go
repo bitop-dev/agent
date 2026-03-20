@@ -30,11 +30,12 @@ type Config struct {
 }
 
 type PluginSource struct {
-	Name    string `yaml:"name"`
-	Type    string `yaml:"type,omitempty"`
-	Path    string `yaml:"path,omitempty"`
-	URL     string `yaml:"url,omitempty"`
-	Enabled bool   `yaml:"enabled,omitempty"`
+	Name         string `yaml:"name"`
+	Type         string `yaml:"type,omitempty"`
+	Path         string `yaml:"path,omitempty"`
+	URL          string `yaml:"url,omitempty"`
+	Enabled      bool   `yaml:"enabled,omitempty"`
+	PublishToken string `yaml:"publishToken,omitempty"`
 }
 
 type ProviderConfig struct {
@@ -44,8 +45,10 @@ type ProviderConfig struct {
 }
 
 type PluginConfig struct {
-	Enabled bool           `yaml:"enabled"`
-	Config  map[string]any `yaml:"config"`
+	Enabled          bool           `yaml:"enabled"`
+	InstalledVersion string         `yaml:"installedVersion,omitempty"`
+	InstalledSource  string         `yaml:"installedSource,omitempty"`
+	Config           map[string]any `yaml:"config"`
 }
 
 func DefaultPaths(cwd string) (Paths, error) {
@@ -141,6 +144,19 @@ func (c Config) IsPluginEnabled(name string) bool {
 		}
 	}
 	return false
+}
+
+func (c *Config) SetPluginInstallRecord(name, version, source string) {
+	if c.Plugins == nil {
+		c.Plugins = make(map[string]PluginConfig)
+	}
+	pluginCfg := c.Plugins[name]
+	pluginCfg.InstalledVersion = version
+	pluginCfg.InstalledSource = source
+	if pluginCfg.Config == nil {
+		pluginCfg.Config = map[string]any{}
+	}
+	c.Plugins[name] = pluginCfg
 }
 
 func (c *Config) SetPluginEnabled(name string, enabled bool) {

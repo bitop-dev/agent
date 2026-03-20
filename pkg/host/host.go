@@ -11,6 +11,11 @@ import (
 type Capabilities interface {
 	// SpawnSubRun creates a bounded sub-agent run with a restricted profile and tool set.
 	SpawnSubRun(ctx context.Context, req SubRunRequest) (SubRunResult, error)
+	// SpawnSubRunParallel runs multiple sub-agent tasks concurrently and returns all results.
+	// Results are in the same order as the input requests.
+	// If any sub-agent fails, its error is included in the combined error but other results
+	// are still returned.
+	SpawnSubRunParallel(ctx context.Context, reqs []SubRunRequest) ([]SubRunResult, []error)
 }
 
 type SubRunRequest struct {

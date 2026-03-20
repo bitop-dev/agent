@@ -18,8 +18,9 @@ type Metadata struct {
 type EntryKind string
 
 const (
-	EntryMessage EntryKind = "message"
-	EntryEvent   EntryKind = "event"
+	EntryMessage    EntryKind = "message"
+	EntryEvent      EntryKind = "event"
+	EntryCompaction EntryKind = "compaction" // structured summary replacing older messages
 )
 
 type Entry struct {
