@@ -55,7 +55,59 @@ func TestDescriptorToolRunHTTP(t *testing.T) {
 }
 
 func TestRegisterDiscoveredRegistersPluginAssetsAndTools(t *testing.T) {
-	loader := Loader{Roots: []string{filepath.Join("..", "..", "..", "agent-plugins")}, Enable: func(name string) bool { return name == "send-email" }}
+	// Build a self-contained test plugin in a temp dir.
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "test-plugin")
+	if err := os.MkdirAll(filepath.Join(pluginDir, "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(pluginDir, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(pluginDir, "profiles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(pluginDir, "policies"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `apiVersion: agent/v1
+kind: Plugin
+metadata:
+  name: test-plugin
+  version: 0.1.0
+  description: test
+spec:
+  category: asset
+  runtime:
+    type: asset
+  contributes:
+    tools:
+      - id: test/tool
+        path: tools/tool.yaml
+    prompts:
+      - id: test/prompt
+        path: prompts/prompt.md
+    profileTemplates:
+      - id: test/profile
+        path: profiles/profile.yaml
+    policies:
+      - id: test/policy
+        path: policies/policy.yaml
+  configSchema:
+    type: object
+    properties: {}
+    required: []
+  requires:
+    framework: ">=0.1.0"
+    plugins: []
+`
+	os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(manifest), 0o644)
+	os.WriteFile(filepath.Join(pluginDir, "tools", "tool.yaml"), []byte("id: test/tool\ndescription: test tool\ninputSchema:\n  type: object\n  properties: {}\nexecution:\n  mode: http\n  operation: test\nrisk:\n  level: low\n"), 0o644)
+	os.WriteFile(filepath.Join(pluginDir, "prompts", "prompt.md"), []byte("test prompt"), 0o644)
+	os.WriteFile(filepath.Join(pluginDir, "profiles", "profile.yaml"), []byte("test profile"), 0o644)
+	os.WriteFile(filepath.Join(pluginDir, "policies", "policy.yaml"), []byte("version: 1\nrules: []\n"), 0o644)
+
+	loader := Loader{Roots: []string{dir}, Enable: func(name string) bool { return name == "test-plugin" }}
 	toolRegistry := registry.NewToolRegistry()
 	promptRegistry := registry.NewPromptRegistry()
 	profileRegistry := registry.NewProfileTemplateRegistry()
@@ -68,27 +120,25 @@ func TestRegisterDiscoveredRegistersPluginAssetsAndTools(t *testing.T) {
 		Prompts:          promptRegistry,
 		ProfileTemplates: profileRegistry,
 		Policies:         policyRegistry,
-		PluginConfigs: map[string]config.PluginConfig{
-			"send-email": {Enabled: true, Config: map[string]any{"baseURL": "https://example.test", "provider": "smtp"}},
-		},
+		PluginConfigs:    map[string]config.PluginConfig{},
 	})
 	if err != nil {
 		t.Fatalf("register discovered: %v", err)
 	}
-	if _, ok := pluginRegistry.Get("send-email"); !ok {
-		t.Fatal("expected send-email plugin to be registered")
+	if _, ok := pluginRegistry.Get("test-plugin"); !ok {
+		t.Fatal("expected test-plugin to be registered")
 	}
-	if _, ok := toolRegistry.Get("email/send"); !ok {
-		t.Fatal("expected email/send tool to be registered")
+	if _, ok := toolRegistry.Get("test/tool"); !ok {
+		t.Fatal("expected test/tool to be registered")
 	}
-	if _, ok := promptRegistry.Get("email/style-default"); !ok {
-		t.Fatal("expected email prompt to be registered")
+	if _, ok := promptRegistry.Get("test/prompt"); !ok {
+		t.Fatal("expected test/prompt to be registered")
 	}
-	if _, ok := profileRegistry.Get("email/assistant"); !ok {
-		t.Fatal("expected email profile template to be registered")
+	if _, ok := profileRegistry.Get("test/profile"); !ok {
+		t.Fatal("expected test/profile to be registered")
 	}
-	if _, ok := policyRegistry.Get("email/default"); !ok {
-		t.Fatal("expected email policy to be registered")
+	if _, ok := policyRegistry.Get("test/policy"); !ok {
+		t.Fatal("expected test/policy to be registered")
 	}
 }
 
