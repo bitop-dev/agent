@@ -38,6 +38,16 @@ type InstallResult struct {
 type InstallOptions struct {
 	Link         bool   // symlink instead of copy (local installs only)
 	SourceFilter string // if non-empty, only consider this source name
+	Version      string // if non-empty, install this exact version (registry only)
+}
+
+// ParseNameVersion splits "name@version" into name and version.
+// If no "@" is present, version is empty (meaning "latest").
+func ParseNameVersion(ref string) (name, version string) {
+	if idx := strings.LastIndex(ref, "@"); idx > 0 {
+		return ref[:idx], ref[idx+1:]
+	}
+	return ref, ""
 }
 
 func InstallLocal(source, destinationRoot string, link bool) (InstallResult, error) {
@@ -63,7 +73,7 @@ func Install(source string, sources []config.PluginSource, destinationRoot strin
 	manifestPath, sourceDir, err := resolveSource(source, filtered)
 	if err != nil {
 		// Local resolution failed. Try registry sources before giving up.
-		if result, regErr := installFromRegistry(source, filtered, destinationRoot); regErr == nil {
+		if result, regErr := installFromRegistry(source, filtered, destinationRoot, opts.Version); regErr == nil {
 			return result, nil
 		}
 		return InstallResult{}, err
@@ -119,7 +129,7 @@ func Upgrade(name string, sources []config.PluginSource, cfg config.Config, dest
 	}
 
 	// Check registry for the latest version before removing current install.
-	result, err := installFromRegistry(name, sources, destinationRoot+".upgrade-tmp")
+	result, err := installFromRegistry(name, sources, destinationRoot+".upgrade-tmp", "")
 	if err != nil {
 		return InstallResult{}, fmt.Errorf("could not fetch upgrade for %q: %w", name, err)
 	}

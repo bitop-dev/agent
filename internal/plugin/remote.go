@@ -155,7 +155,8 @@ func entryToManifest(entry registryEntry) plg.Manifest {
 
 // installFromRegistry finds a package by name across enabled registry sources,
 // downloads and verifies the artifact, and extracts it to destinationRoot.
-func installFromRegistry(name string, sources []config.PluginSource, destinationRoot string) (InstallResult, error) {
+// If requestedVersion is non-empty, only that exact version is used.
+func installFromRegistry(name string, sources []config.PluginSource, destinationRoot string, requestedVersion string) (InstallResult, error) {
 	for _, source := range sources {
 		if !source.Enabled || source.Type != "registry" || strings.TrimSpace(source.URL) == "" {
 			continue
@@ -168,8 +169,21 @@ func installFromRegistry(name string, sources []config.PluginSource, destination
 		if len(meta.Versions) == 0 {
 			continue
 		}
-		// Use the first (latest) version.
-		ver := meta.Versions[0]
+		// Select the matching version, or the first (latest) if none specified.
+		var ver *registryVersion
+		if requestedVersion != "" {
+			for i := range meta.Versions {
+				if meta.Versions[i].Version == requestedVersion {
+					ver = &meta.Versions[i]
+					break
+				}
+			}
+			if ver == nil {
+				continue // version not found in this registry, try next
+			}
+		} else {
+			ver = &meta.Versions[0]
+		}
 		if ver.Artifact.URL == "" {
 			return InstallResult{}, fmt.Errorf("registry package %q has no artifact URL", name)
 		}

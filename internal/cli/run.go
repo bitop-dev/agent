@@ -479,8 +479,13 @@ func runPluginLifecycle(ctx context.Context, app service.App, args []string) err
 		if source == "" {
 			return errors.New("plugins install requires a source path or plugin name")
 		}
+		// Parse name@version syntax (e.g. "send-email@0.2.0").
+		name, version := internalplugin.ParseNameVersion(source)
+		if version != "" {
+			source = name // strip the @version for path resolution
+		}
 		result, err := internalplugin.Install(source, app.Config.PluginSources, app.Paths.UserPluginsDir,
-			internalplugin.InstallOptions{Link: link, SourceFilter: sourceFilter})
+			internalplugin.InstallOptions{Link: link, SourceFilter: sourceFilter, Version: version})
 		if err != nil {
 			return err
 		}
