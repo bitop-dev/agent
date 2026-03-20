@@ -205,6 +205,45 @@ func (t DescriptorTool) runHost(ctx context.Context, call tool.Call) (tool.Resul
 		return tool.Result{}, fmt.Errorf("plugin tool %s requires host capabilities but none are configured", t.Descriptor.ID)
 	}
 	switch t.Descriptor.Execution.Operation {
+	case "discover-agents":
+		agents, err := t.HostCaps.DiscoverAgents(ctx)
+		if err != nil {
+			return tool.Result{}, err
+		}
+		// Build text summary for the model.
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Available agents: %d", len(agents)))
+		lines = append(lines, "")
+		for _, a := range agents {
+			lines = append(lines, fmt.Sprintf("  **%s** (v%s)", a.Name, a.Version))
+			if a.Description != "" {
+				lines = append(lines, fmt.Sprintf("    %s", a.Description))
+			}
+			if len(a.Capabilities) > 0 {
+				lines = append(lines, fmt.Sprintf("    capabilities: %s", strings.Join(a.Capabilities, ", ")))
+			}
+			if a.Accepts != "" {
+				lines = append(lines, fmt.Sprintf("    accepts: %s", a.Accepts))
+			}
+			if a.Returns != "" {
+				lines = append(lines, fmt.Sprintf("    returns: %s", a.Returns))
+			}
+			if len(a.Tools) > 0 {
+				lines = append(lines, fmt.Sprintf("    tools: %s", strings.Join(a.Tools, ", ")))
+			}
+			lines = append(lines, "")
+		}
+		// Convert agents to []any for JSON.
+		agentData := make([]any, len(agents))
+		for i, a := range agents {
+			agentData[i] = a
+		}
+		return tool.Result{
+			ToolID: call.ToolID,
+			Output: strings.Join(lines, "\n"),
+			Data:   map[string]any{"agents": agentData, "count": len(agents)},
+		}, nil
+
 	case "spawn-sub-agent":
 		task, _ := call.Arguments["task"].(string)
 		profile, _ := call.Arguments["profile"].(string)

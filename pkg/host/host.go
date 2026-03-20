@@ -6,9 +6,23 @@ import (
 	"github.com/bitop-dev/agent/pkg/tool"
 )
 
+// AgentInfo describes a discoverable agent profile.
+type AgentInfo struct {
+	Name         string   `json:"name"`
+	Version      string   `json:"version"`
+	Description  string   `json:"description"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Accepts      string   `json:"accepts,omitempty"`
+	Returns      string   `json:"returns,omitempty"`
+	Tools        []string `json:"tools"` // tool IDs available to this agent
+}
+
 // Capabilities is the bounded API surface exposed to privileged host-runtime plugins.
 // It intentionally does not expose core internals - it exposes only controlled operations.
 type Capabilities interface {
+	// DiscoverAgents returns metadata for all discoverable agent profiles.
+	// Orchestrators use this to decide which agents to delegate to.
+	DiscoverAgents(ctx context.Context) ([]AgentInfo, error)
 	// SpawnSubRun creates a bounded sub-agent run with a restricted profile and tool set.
 	SpawnSubRun(ctx context.Context, req SubRunRequest) (SubRunResult, error)
 	// SpawnSubRunParallel runs multiple sub-agent tasks concurrently and returns all results.

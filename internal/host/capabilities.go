@@ -27,9 +27,64 @@ type RuntimeCapabilities struct {
 	Tools        *registry.ToolRegistry
 	Providers    *registry.ProviderRegistry
 	Prompts      *registry.PromptRegistry
+	Events       events.Sink // parent event sink — sub-agent events are forwarded here with a prefix
 	DefaultCWD   string
 	MaxDepth     int
 	currentDepth int
+}
+
+// subAgentSink forwards sub-agent events to the parent sink with a prefix
+// so the user can see what the child is doing.
+type subAgentSink struct {
+	parent events.Sink
+	prefix string
+}
+
+func (s subAgentSink) Publish(ctx context.Context, event events.Event) error {
+	if s.parent == nil {
+		return nil
+	}
+	switch event.Type {
+	case events.TypeToolRequested:
+		event.Message = fmt.Sprintf("%s → %s", s.prefix, event.Message)
+	case events.TypeToolFinished:
+		event.Message = fmt.Sprintf("%s → %s", s.prefix, truncateForDisplay(event.Message, 120))
+	case events.TypeError:
+		event.Message = fmt.Sprintf("%s → error: %s", s.prefix, event.Message)
+	case events.TypeAssistantDelta:
+		return nil // don't forward streaming text from sub-agents
+	default:
+		return nil // skip turn-started, turn-finished, etc.
+	}
+	return s.parent.Publish(ctx, event)
+}
+
+func truncateForDisplay(s string, max int) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
+func (c *RuntimeCapabilities) DiscoverAgents(ctx context.Context) ([]pkghost.AgentInfo, error) {
+	discovered, err := c.Profiles.Discover(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var agents []pkghost.AgentInfo
+	for _, d := range discovered {
+		agents = append(agents, pkghost.AgentInfo{
+			Name:         d.Manifest.Metadata.Name,
+			Version:      d.Manifest.Metadata.Version,
+			Description:  d.Manifest.Metadata.Description,
+			Capabilities: d.Manifest.Metadata.Capabilities,
+			Accepts:      d.Manifest.Metadata.Accepts,
+			Returns:      d.Manifest.Metadata.Returns,
+			Tools:        d.Manifest.Spec.Tools.Enabled,
+		})
+	}
+	return agents, nil
 }
 
 func (c *RuntimeCapabilities) SpawnSubRun(ctx context.Context, req pkghost.SubRunRequest) (pkghost.SubRunResult, error) {
@@ -63,7 +118,8 @@ func (c *RuntimeCapabilities) SpawnSubRun(ctx context.Context, req pkghost.SubRu
 	}
 	// Sub-agents always use deny-all approval to prevent runaway nested approvals.
 	approvalResolver := denyAllResolver{}
-	eventSink := events.NopSink{}
+	// Forward sub-agent events to the parent so progress is visible.
+	eventSink := subAgentSink{parent: c.Events, prefix: fmt.Sprintf("[sub:%s]", profileRef)}
 	runner := internalruntime.Runner{}
 	runReq := pkgruntime.RunRequest{
 		Prompt:       req.Task,

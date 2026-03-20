@@ -41,6 +41,7 @@ type App struct {
 	ProfileTemplates *registry.ProfileTemplateRegistry
 	Policies         *registry.PolicyRegistry
 	MCPManager       *internalmcp.Manager
+	HostCaps         *internalhost.RuntimeCapabilities
 	Runner           pkgruntime.Runner
 	Sessions         session.Store
 }
@@ -118,6 +119,7 @@ func Bootstrap(cwd string) (App, error) {
 		ProfileTemplates: profileTemplateRegistry,
 		Policies:         policyRegistry,
 		MCPManager:       mcpManager,
+		HostCaps:         hostCaps,
 		Runner:           internalruntime.Runner{},
 		Sessions:         store.Store{Path: filepath.Join(paths.SessionsDir, "sessions.db")},
 	}

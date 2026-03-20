@@ -10,9 +10,12 @@ type Manifest struct {
 }
 
 type Metadata struct {
-	Name        string `yaml:"name"`
-	Version     string `yaml:"version"`
-	Description string `yaml:"description"`
+	Name         string   `yaml:"name"`
+	Version      string   `yaml:"version"`
+	Description  string   `yaml:"description"`
+	Capabilities []string `yaml:"capabilities,omitempty"` // discoverable capability tags
+	Accepts      string   `yaml:"accepts,omitempty"`      // what input this agent expects
+	Returns      string   `yaml:"returns,omitempty"`      // what output this agent produces
 }
 
 type Spec struct {

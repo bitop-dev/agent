@@ -1415,6 +1415,10 @@ type sessionView struct {
 
 func executeRun(ctx context.Context, app service.App, input runInput) (pkgruntime.RunResult, error) {
 	eventSink := streamSink{Writer: os.Stdout}
+	// Forward parent event sink to host capabilities so sub-agent progress is visible.
+	if app.HostCaps != nil {
+		app.HostCaps.Events = eventSink
+	}
 	runReq := pkgruntime.RunRequest{
 		Prompt:       input.Prompt,
 		SystemPrompt: loadSystemInstructions(input.ProfilePath, input.Manifest.Spec.Instructions.System, app.Prompts),
