@@ -76,6 +76,7 @@ func dispatch(ctx context.Context, app service.App, args []string) error {
 
 func serveCommand(ctx context.Context, app service.App, args []string) error {
 	profileRef := ""
+	addr := ""
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--profile":
@@ -84,17 +85,35 @@ func serveCommand(ctx context.Context, app service.App, args []string) error {
 			}
 			profileRef = args[i+1]
 			i++
+		case "--addr":
+			if i+1 >= len(args) {
+				return errors.New("--addr requires a value")
+			}
+			addr = args[i+1]
+			i++
 		}
 	}
-	if profileRef == "" {
-		return errors.New("serve requires --profile")
+
+	if addr == "" && profileRef == "" {
+		return errors.New("serve requires --profile (MCP stdio) or --addr (HTTP worker) or both")
 	}
+
+	// HTTP worker mode: start HTTP server that accepts any profile per-request.
+	if addr != "" {
+		return serveHTTP(ctx, app, addr, profileRef)
+	}
+
+	// MCP stdio mode: fixed profile.
+	return serveMCPStdio(ctx, app, profileRef)
+}
+
+// serveMCPStdio starts an MCP tool server over stdio for a fixed profile.
+func serveMCPStdio(ctx context.Context, app service.App, profileRef string) error {
 	manifest, _, err := app.Profiles.Load(ctx, profileRef)
 	if err != nil {
 		return fmt.Errorf("profile %q not found", profileRef)
 	}
 
-	// Build the MCP tool definition from the profile.
 	toolSchema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -102,15 +121,12 @@ func serveCommand(ctx context.Context, app service.App, args []string) error {
 				"type":        "string",
 				"description": "The task for this agent to execute",
 			},
+			"context": map[string]any{
+				"type":        "object",
+				"description": "Structured context: date, constraints, prior results, etc.",
+			},
 		},
 		"required": []string{"task"},
-	}
-	// Add context parameter if the profile has capabilities metadata.
-	if manifest.Metadata.Accepts != "" {
-		toolSchema["properties"].(map[string]any)["context"] = map[string]any{
-			"type":        "object",
-			"description": "Structured context: date, constraints, prior results, etc.",
-		}
 	}
 
 	agentTool := internalmcp.ServerTool{
@@ -118,45 +134,48 @@ func serveCommand(ctx context.Context, app service.App, args []string) error {
 		Description: manifest.Metadata.Description,
 		InputSchema: toolSchema,
 		Handler: func(toolCtx context.Context, arguments map[string]any) (string, error) {
-			task, _ := arguments["task"].(string)
-			if strings.TrimSpace(task) == "" {
-				return "", errors.New("task is required")
-			}
-			// Load full profile for each call (in case it was updated).
-			m, path, err := app.Profiles.Load(toolCtx, profileRef)
-			if err != nil {
-				return "", err
-			}
-			providerImpl, err := app.ResolveProvider(m.Spec.Provider.Default)
-			if err != nil {
-				return "", err
-			}
-			tools, err := app.ResolveTools(m.Spec.Tools.Enabled)
-			if err != nil {
-				return "", err
-			}
-			workspaceRef, _ := workspace.Resolve(app.Paths.CWD)
-			// Use stderr for events — stdout is the MCP protocol pipe.
-			result, err := executeServeRun(toolCtx, app, runInput{
-				Prompt:       task,
-				Manifest:     m,
-				ProfilePath:  path,
-				ProviderImpl: providerImpl,
-				Tools:        tools,
-				Workspace:    workspaceRef,
-				NoSession:    true,
-				CWD:          app.Paths.CWD,
-			})
-			if err != nil {
-				return "", err
-			}
-			return result.Output, nil
+			return runTaskForServe(toolCtx, app, profileRef, arguments)
 		},
 	}
 
 	server := internalmcp.NewServer("agent", "0.2.0", []internalmcp.ServerTool{agentTool})
 	fmt.Fprintf(os.Stderr, "MCP server started: profile=%s tool=%s\n", manifest.Metadata.Name, manifest.Metadata.Name)
 	return server.Serve(ctx, os.Stdin, os.Stdout)
+}
+
+// runTaskForServe executes a task using a named profile. Shared by MCP and HTTP modes.
+func runTaskForServe(ctx context.Context, app service.App, profileRef string, arguments map[string]any) (string, error) {
+	task, _ := arguments["task"].(string)
+	if strings.TrimSpace(task) == "" {
+		return "", errors.New("task is required")
+	}
+	m, path, err := app.Profiles.Load(ctx, profileRef)
+	if err != nil {
+		return "", fmt.Errorf("profile %q not found", profileRef)
+	}
+	providerImpl, err := app.ResolveProvider(m.Spec.Provider.Default)
+	if err != nil {
+		return "", err
+	}
+	tools, err := app.ResolveTools(m.Spec.Tools.Enabled)
+	if err != nil {
+		return "", err
+	}
+	workspaceRef, _ := workspace.Resolve(app.Paths.CWD)
+	result, err := executeServeRun(ctx, app, runInput{
+		Prompt:       task,
+		Manifest:     m,
+		ProfilePath:  path,
+		ProviderImpl: providerImpl,
+		Tools:        tools,
+		Workspace:    workspaceRef,
+		NoSession:    true,
+		CWD:          app.Paths.CWD,
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.Output, nil
 }
 
 func runCommand(ctx context.Context, app service.App, args []string) error {
@@ -1234,6 +1253,8 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  chat                    Start an interactive session")
 	fmt.Println("  serve --profile <ref>   Start as an MCP tool server (stdio transport)")
+	fmt.Println("  serve --addr :9898     Start as an HTTP worker (dynamic profile loading)")
+	fmt.Println("  serve --addr :9898 --profile <ref>  HTTP worker with fixed profile")
 	fmt.Println("  run                     Execute a one-shot run")
 	fmt.Println("  resume                  Resume a previous session with a new prompt")
 	fmt.Println("  profiles list                               List discoverable profiles")
