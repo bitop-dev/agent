@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -156,12 +157,101 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 	log.Printf("  GET  /v1/agents   — list available agents")
 	log.Printf("  GET  /v1/health   — health check")
 
+	// Register with configured registry sources.
+	profiles, _ := app.Profiles.Discover(ctx)
+	var profileNames, capabilities []string
+	for _, p := range profiles {
+		profileNames = append(profileNames, p.Manifest.Metadata.Name)
+		capabilities = append(capabilities, p.Manifest.Metadata.Capabilities...)
+	}
+	workerURL := "http://" + resolveWorkerURL(addr)
+	registerWithRegistries(app, workerURL, profileNames, dedup(capabilities))
+
 	server := &http.Server{Addr: addr, Handler: mux}
+
+	// Start heartbeat goroutine.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				deregisterFromRegistries(app, workerURL)
+				return
+			case <-ticker.C:
+				registerWithRegistries(app, workerURL, profileNames, dedup(capabilities))
+			}
+		}
+	}()
+
 	go func() {
 		<-ctx.Done()
+		deregisterFromRegistries(app, workerURL)
 		server.Close()
 	}()
 	return server.ListenAndServe()
+}
+
+func resolveWorkerURL(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		// Try to get the hostname for a better URL.
+		if host, err := os.Hostname(); err == nil {
+			return host + addr
+		}
+		return "localhost" + addr
+	}
+	return addr
+}
+
+func registerWithRegistries(app service.App, workerURL string, profiles, capabilities []string) {
+	payload := map[string]any{
+		"url":          workerURL,
+		"profiles":     profiles,
+		"capabilities": capabilities,
+	}
+	data, _ := json.Marshal(payload)
+	for _, source := range app.Config.PluginSources {
+		if source.Type != "registry" || !source.Enabled || source.URL == "" {
+			continue
+		}
+		url := strings.TrimRight(source.URL, "/") + "/v1/workers"
+		resp, err := http.Post(url, "application/json", strings.NewReader(string(data)))
+		if err != nil {
+			log.Printf("worker registration failed (%s): %v", source.Name, err)
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			log.Printf("registered with registry %s as %s", source.Name, workerURL)
+		}
+	}
+}
+
+func deregisterFromRegistries(app service.App, workerURL string) {
+	for _, source := range app.Config.PluginSources {
+		if source.Type != "registry" || !source.Enabled || source.URL == "" {
+			continue
+		}
+		url := strings.TrimRight(source.URL, "/") + "/v1/workers?url=" + workerURL
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+	}
+}
+
+func dedup(items []string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, item := range items {
+		if item != "" && !seen[item] {
+			seen[item] = true
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func writeHTTPJSON(w http.ResponseWriter, status int, v any) {
