@@ -188,7 +188,7 @@ spec:
 ### Install and enable
 
 ```bash
-go run ./cmd/agent plugins install ./_testing/plugins/mcp-filesystem --link
+go run ./cmd/agent plugins install ../agent-plugins/mcp-filesystem --link
 go run ./cmd/agent plugins enable mcp-filesystem
 ```
 
@@ -236,7 +236,7 @@ spec:
 ### Run it
 
 ```bash
-go run ./cmd/agent run --profile ./_testing/plugins/mcp-filesystem/profiles/researcher.yaml "List the entries in /tmp"
+go run ./cmd/agent run --profile ../agent-plugins/mcp-filesystem/profiles/researcher.yaml "List the entries in /tmp"
 ```
 
 Use stdio MCP when:

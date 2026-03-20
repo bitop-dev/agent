@@ -50,7 +50,7 @@ go run ./cmd/agent plugins list
 Install a local plugin bundle:
 
 ```bash
-go run ./cmd/agent plugins install ./_testing/plugins/send-email --link
+go run ./cmd/agent plugins install ../agent-plugins/send-email --link
 ```
 
 Configure it from the CLI:

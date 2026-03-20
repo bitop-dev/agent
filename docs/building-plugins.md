@@ -382,7 +382,7 @@ Normal runtime discovery uses:
 
 In this repository, example plugin bundles live under:
 
-- `_testing/plugins/`
+- `../agent-plugins/`
 
 and example plugin runtimes live under:
 

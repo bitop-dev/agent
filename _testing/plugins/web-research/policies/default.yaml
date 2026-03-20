@@ -1,5 +1,0 @@
-version: 1
-rules:
-  - id: allow-web-tools
-    action: network
-    decision: allow

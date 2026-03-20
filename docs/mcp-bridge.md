@@ -197,7 +197,7 @@ Policy and approval still apply to tool calls before they are forwarded to the M
 Installing a filesystem MCP server:
 
 ```bash
-go run ./cmd/agent plugins install ./_testing/plugins/mcp-filesystem --link
+go run ./cmd/agent plugins install ../agent-plugins/mcp-filesystem --link
 go run ./cmd/agent plugins config set mcp-filesystem command '["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]'
 go run ./cmd/agent plugins enable mcp-filesystem
 ```
@@ -205,7 +205,7 @@ go run ./cmd/agent plugins enable mcp-filesystem
 Running with an MCP-enabled profile:
 
 ```bash
-go run ./cmd/agent run --profile ./_testing/plugins/mcp-filesystem/profiles/researcher.yaml "Summarize all markdown files in /tmp"
+go run ./cmd/agent run --profile ../agent-plugins/mcp-filesystem/profiles/researcher.yaml "Summarize all markdown files in /tmp"
 ```
 
 Using a remote MCP endpoint with headers:

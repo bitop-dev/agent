@@ -2,7 +2,7 @@
 
 This example shows how to run local HTTP-backed plugins for testing.
 
-The plugin bundles live in `_testing/plugins/` as repository-local examples and fixtures.
+The plugin bundles live in `../agent-plugins/` as workspace-local examples and fixtures.
 They are not the core agent runtime.
 The actual plugin runtime executables live separately under `_testing/runtimes/`.
 
@@ -26,8 +26,8 @@ Default listen addresses:
 ## Install the example plugins
 
 ```bash
-HOME=/tmp/agent-home go run ./cmd/agent plugins install ./_testing/plugins/send-email --link
-HOME=/tmp/agent-home go run ./cmd/agent plugins install ./_testing/plugins/web-research --link
+HOME=/tmp/agent-home go run ./cmd/agent plugins install ../agent-plugins/send-email --link
+HOME=/tmp/agent-home go run ./cmd/agent plugins install ../agent-plugins/web-research --link
 ```
 
 ## Create a temporary config
@@ -61,13 +61,13 @@ If you prefer a fixed example file, `docs/examples/config/plugin-http-example.ya
 ## Test the web plugin
 
 ```bash
-HOME=/tmp/agent-home go run ./cmd/agent run --profile ./_testing/profiles/web-local/profile.yaml "search golang plugin architecture"
+HOME=/tmp/agent-home go run ./cmd/agent run --profile ../agent-plugins/web-research/examples/profiles/web-local/profile.yaml "search golang plugin architecture"
 ```
 
 ## Test the email plugin
 
 ```bash
-HOME=/tmp/agent-home go run ./cmd/agent run --profile ./_testing/profiles/email-local/profile.yaml --approval always "send email hello from the local plugin server"
+HOME=/tmp/agent-home go run ./cmd/agent run --profile ../agent-plugins/send-email/examples/profiles/email-local/profile.yaml --approval always "send email hello from the local plugin server"
 ```
 
 Note:
@@ -77,11 +77,11 @@ Note:
 - use `--approval always` only for controlled testing
 - shell and network decisions can also be overridden explicitly with profile policy overlays when you really want non-interactive automation
 
-If you want to test an explicit override, use `./_testing/profiles/email-openai-no-approval/profile.yaml`.
+If you want to test an explicit override, use `../agent-plugins/send-email/examples/profiles/email-openai-no-approval/profile.yaml`.
 That profile demonstrates a policy overlay that allows `email/send` without an approval prompt.
 
 ## Expected behavior
 
-- `web-local` uses the `mock` provider to call `web/search` or `web/fetch`
-- `email-local` uses the `mock` provider to call `email/draft` or `email/send`
+- `web-local` in `../agent-plugins/web-research/examples/profiles/` uses the `mock` provider to call `web/search` or `web/fetch`
+- `email-local` in `../agent-plugins/send-email/examples/profiles/` uses the `mock` provider to call `email/draft` or `email/send`
 - the actual tool execution is handled by separate HTTP plugin runtimes in `_testing/runtimes/`, not the core `agent` binary

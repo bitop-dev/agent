@@ -55,7 +55,7 @@ func TestDescriptorToolRunHTTP(t *testing.T) {
 }
 
 func TestRegisterDiscoveredRegistersPluginAssetsAndTools(t *testing.T) {
-	loader := Loader{Roots: []string{filepath.Join("..", "..", "_testing", "plugins")}, Enable: func(name string) bool { return name == "send-email" }}
+	loader := Loader{Roots: []string{filepath.Join("..", "..", "..", "agent-plugins")}, Enable: func(name string) bool { return name == "send-email" }}
 	toolRegistry := registry.NewToolRegistry()
 	promptRegistry := registry.NewPromptRegistry()
 	profileRegistry := registry.NewProfileTemplateRegistry()

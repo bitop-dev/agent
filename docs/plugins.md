@@ -18,7 +18,7 @@ If you want the conceptual overview first, start with:
 ```bash
 go run ./cmd/agent plugins list
 go run ./cmd/agent plugins show send-email
-go run ./cmd/agent plugins validate ./_testing/plugins/send-email
+go run ./cmd/agent plugins validate ../agent-plugins/send-email
 go run ./cmd/agent plugins config send-email
 go run ./cmd/agent plugins validate-config send-email
 ```
@@ -28,8 +28,8 @@ go run ./cmd/agent plugins validate-config send-email
 Use `--link` while developing so the installed plugin points at your local checkout.
 
 ```bash
-go run ./cmd/agent plugins install ./_testing/plugins/send-email --link
-go run ./cmd/agent plugins install ./_testing/plugins/web-research --link
+go run ./cmd/agent plugins install ../agent-plugins/send-email --link
+go run ./cmd/agent plugins install ../agent-plugins/web-research --link
 ```
 
 ## Set plugin config from the CLI
@@ -89,4 +89,4 @@ Enabling a plugin also validates its config, so required keys must already be pr
 
 ## Example: local HTTP plugins
 
-For the repository examples under `_testing/plugins/`, see `docs/plugin-http-example.md`.
+For the example plugin bundles under `../agent-plugins/`, see `docs/plugin-http-example.md`.
