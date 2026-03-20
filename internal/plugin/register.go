@@ -212,6 +212,53 @@ func (t DescriptorTool) runHost(ctx context.Context, call tool.Call) (tool.Resul
 			Output: result.Output,
 			Data:   map[string]any{"sessionId": result.SessionID, "turns": result.Turns},
 		}, nil
+
+	case "spawn-sub-agents-parallel":
+		tasksRaw, _ := call.Arguments["tasks"].([]any)
+		if len(tasksRaw) == 0 {
+			return tool.Result{}, fmt.Errorf("agent/spawn-parallel: tasks is required and must be non-empty")
+		}
+		reqs := make([]pkghost.SubRunRequest, 0, len(tasksRaw))
+		for _, item := range tasksRaw {
+			taskMap, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			task, _ := taskMap["task"].(string)
+			profile, _ := taskMap["profile"].(string)
+			maxTurns := 6
+			if mt, ok := taskMap["maxTurns"].(float64); ok && mt > 0 {
+				maxTurns = int(mt)
+			}
+			reqs = append(reqs, pkghost.SubRunRequest{
+				Task:     task,
+				Profile:  profile,
+				MaxTurns: maxTurns,
+			})
+		}
+		results, errs := t.HostCaps.SpawnSubRunParallel(ctx, reqs)
+		// Build a combined output with each result labelled by task number.
+		var outputLines []string
+		var resultData []map[string]any
+		for i, result := range results {
+			label := fmt.Sprintf("Task %d", i+1)
+			if i < len(reqs) && reqs[i].Task != "" {
+				label = fmt.Sprintf("Task %d (%s…)", i+1, truncateStr(reqs[i].Task, 40))
+			}
+			if i < len(errs) && errs[i] != nil {
+				outputLines = append(outputLines, fmt.Sprintf("=== %s — ERROR ===\n%s", label, errs[i].Error()))
+				resultData = append(resultData, map[string]any{"task": i + 1, "error": errs[i].Error()})
+			} else {
+				outputLines = append(outputLines, fmt.Sprintf("=== %s ===\n%s", label, result.Output))
+				resultData = append(resultData, map[string]any{"task": i + 1, "output": result.Output, "sessionId": result.SessionID})
+			}
+		}
+		return tool.Result{
+			ToolID: call.ToolID,
+			Output: strings.Join(outputLines, "\n\n"),
+			Data:   map[string]any{"results": resultData},
+		}, nil
+
 	default:
 		return tool.Result{}, fmt.Errorf("plugin tool %s: unsupported host operation %q", t.Descriptor.ID, t.Descriptor.Execution.Operation)
 	}
@@ -452,6 +499,13 @@ func isTemplatePlaceholder(s string) bool {
 
 func isFlag(s string) bool {
 	return strings.HasPrefix(s, "-")
+}
+
+func truncateStr(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max]
 }
 
 func resolveTemplateValue(key string, args map[string]any, cfg map[string]any) string {

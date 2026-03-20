@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	internalpolicy "github.com/ncecere/agent/internal/policy"
 	profileloader "github.com/ncecere/agent/internal/profile"
@@ -87,6 +88,24 @@ func (c *RuntimeCapabilities) SpawnSubRun(ctx context.Context, req pkghost.SubRu
 		Output:    result.Output,
 		SessionID: result.SessionID,
 	}, nil
+}
+
+// SpawnSubRunParallel runs multiple sub-agent tasks concurrently.
+// Results are returned in the same order as the input requests.
+// Individual sub-agent errors are collected and returned alongside results.
+func (c *RuntimeCapabilities) SpawnSubRunParallel(ctx context.Context, reqs []pkghost.SubRunRequest) ([]pkghost.SubRunResult, []error) {
+	results := make([]pkghost.SubRunResult, len(reqs))
+	errs := make([]error, len(reqs))
+	var wg sync.WaitGroup
+	for i, req := range reqs {
+		wg.Add(1)
+		go func(i int, req pkghost.SubRunRequest) {
+			defer wg.Done()
+			results[i], errs[i] = c.SpawnSubRun(ctx, req)
+		}(i, req)
+	}
+	wg.Wait()
+	return results, errs
 }
 
 type denyAllResolver struct{}
