@@ -64,6 +64,17 @@ func (m *Manager) start(ctx context.Context, manifest plg.Manifest, cfg config.P
 	endpoint := strings.TrimSpace(rt.Endpoint)
 	headers := mergeStringMaps(rt.Headers, resolveStringMap(cfg.Config, "headers"))
 	envMap := mergeStringMaps(rt.Env, resolveStringMap(cfg.Config, "env"))
+	// Apply envMapping: map plugin config keys → env var names.
+	for configKey, envVar := range rt.EnvMapping {
+		if v, ok := cfg.Config[configKey]; ok {
+			if s := fmt.Sprint(v); s != "" {
+				if envMap == nil {
+					envMap = make(map[string]string)
+				}
+				envMap[envVar] = s
+			}
+		}
+	}
 	// Config can override the command.
 	if rawCmd, ok := cfg.Config["command"]; ok {
 		switch v := rawCmd.(type) {

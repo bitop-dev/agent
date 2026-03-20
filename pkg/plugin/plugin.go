@@ -43,12 +43,20 @@ type Spec struct {
 }
 
 type Runtime struct {
-	Type     RuntimeType       `yaml:"type"`
-	Command  []string          `yaml:"command,omitempty"`
-	Endpoint string            `yaml:"endpoint,omitempty"`
-	Protocol string            `yaml:"protocol,omitempty"`
-	Headers  map[string]string `yaml:"headers,omitempty"`
-	Env      map[string]string `yaml:"env,omitempty"`
+	Type       RuntimeType       `yaml:"type"`
+	Command    []string          `yaml:"command,omitempty"`
+	Endpoint   string            `yaml:"endpoint,omitempty"`
+	Protocol   string            `yaml:"protocol,omitempty"`
+	Headers    map[string]string `yaml:"headers,omitempty"`
+	Env        map[string]string `yaml:"env,omitempty"`
+	// EnvMapping maps plugin config keys to environment variable names for MCP
+	// and command runtimes. For example:
+	//   envMapping:
+	//     grafanaURL: GRAFANA_URL
+	//     grafanaAPIKey: GRAFANA_API_KEY
+	// This allows plugin config values to be injected as env vars without
+	// requiring users to set a nested "env" object in their config.
+	EnvMapping map[string]string `yaml:"envMapping,omitempty"`
 }
 
 type Schema struct {
