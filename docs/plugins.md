@@ -39,27 +39,48 @@ Local path installs are always supported, even if no plugin sources are configur
 
 ## Configure plugin sources
 
-Today, configurable plugin sources support local filesystem directories for active search/install.
-Registry sources can also be configured now, but remote registry search/install is not implemented yet.
+Plugin sources tell the CLI where to search for and install plugins by name.
+Two source types are supported: filesystem directories and registry servers.
 
-Example:
+### Filesystem source
 
-```bash
-go run ./cmd/agent plugins sources add local-dev ../agent-plugins
-go run ./cmd/agent plugins sources list
-go run ./cmd/agent plugins search web
-go run ./cmd/agent plugins install send-email --link
-```
-
-You can also record a future registry source now:
+Points at a local directory of plugin bundles. Good for local development or
+a shared team directory.
 
 ```bash
-go run ./cmd/agent plugins sources add official https://plugins.example.com --type registry
+agent plugins sources add local-dev ../agent-plugins
+agent plugins sources list
+agent plugins search web
+agent plugins install web-research --link
 ```
 
-This lets you install by plugin name from a configured source directory instead of always passing a full path.
+### Registry source
 
-Remote registry-style sources are part of the longer-term Phase 1 package plan. The contract is documented in `../agent-registry/docs/plugin-registry-contract.md`.
+Points at a running registry server that serves a plugin index and downloadable tarballs.
+
+```bash
+agent plugins sources add official http://127.0.0.1:9080 --type registry
+agent plugins search email
+agent plugins install send-email
+```
+
+When installing from a registry source, the framework:
+1. Fetches the package metadata from `/v1/packages/<name>.json`
+2. Downloads the artifact tarball
+3. Verifies the SHA256 checksum
+4. Extracts the tarball to `~/.agent/plugins/<name>/`
+5. Preserves file permissions — executables (`chmod +x`) remain executable
+
+This means plugins that include compiled binaries or scripts work correctly
+after a registry install without any extra build steps.
+
+### View and manage sources
+
+```bash
+agent plugins sources list
+agent plugins sources add my-source /path/to/dir
+agent plugins sources remove my-source
+```
 
 ## Set plugin config from the CLI
 

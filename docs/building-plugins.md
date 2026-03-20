@@ -415,9 +415,258 @@ If you are building a new integration, start here:
 For wrapping existing CLIs or scripts, I recommend `command` first.
 For custom HTTP service integrations, I recommend `http`.
 
+## What plugins can contribute beyond tools
+
+A plugin is not limited to contributing tools. The `contributes` section of `plugin.yaml`
+supports four types of contributions:
+
+```yaml
+spec:
+  contributes:
+    tools:            # callable tools
+    prompts:          # reusable system prompt fragments
+    profileTemplates: # suggested agent profiles
+    policies:         # suggested policy overlay files
+```
+
+### Tools
+
+Tools are the primary contribution. Each tool descriptor file defines the tool's
+ID, description, input schema, execution mode, and risk level.
+
+The tool ID is what the profile lists in `spec.tools.enabled` and what the model
+sees in the API request. Tool IDs use the pattern `namespace/name`
+(e.g. `email/send`, `ddg/search`, `core/read`).
+
+```yaml
+contributes:
+  tools:
+    - id: email/send
+      path: tools/send.yaml
+    - id: email/draft
+      path: tools/draft.yaml
+```
+
+### Prompts
+
+Prompt contributions are reusable system prompt fragments that any profile can
+include by referencing the prompt's ID in `spec.instructions.system`.
+
+```yaml
+contributes:
+  prompts:
+    - id: email/style-default
+      path: prompts/style-default.md
+```
+
+Once the plugin is installed and enabled, any profile can include this prompt:
+
+```yaml
+# profile.yaml
+spec:
+  instructions:
+    system:
+      - ./prompts/my-base.md
+      - email/style-default     # resolved from the plugin registry by ID
+```
+
+The framework loads the file at the registered path and includes its content
+in the system prompt. No hard-coded path is needed in the profile.
+
+**Profiles are always in control of prompts.** Plugin prompts are never
+auto-injected. A profile must explicitly include a prompt ID to use it.
+If you do not reference `email/style-default`, it has no effect.
+
+To override a plugin prompt, simply do not include its ID and write
+your own instructions instead.
+
+See `docs/prompts.md` for the full resolution order and examples.
+
+### Profile templates
+
+Profile templates are example agent configurations shipped with the plugin.
+They show the recommended way to use the plugin and its tools.
+
+```yaml
+contributes:
+  profileTemplates:
+    - id: email/assistant
+      path: profiles/email-assistant.yaml
+```
+
+Profile templates are **registered when the plugin is enabled** but are
+**never auto-applied**. They are reference material only — suggestions from
+the plugin author about how to compose the plugin into a useful agent.
+
+You can:
+- Copy the template as a starting point and modify it freely
+- Ignore it entirely and write your own profile from scratch
+- Use some of its suggestions while changing others
+
+Your profile YAML is always the final word.
+
+### Policies (sensitiveActions and overlay files)
+
+Plugins influence policy in two distinct ways:
+
+#### `permissions.sensitiveActions` — automatic
+
+Any tool listed under `sensitiveActions` is automatically marked as requiring
+approval when the plugin is enabled. No profile configuration needed.
+
+```yaml
+spec:
+  permissions:
+    sensitiveActions:
+      - email/send   # always requires approval
+```
+
+This is the plugin author saying: "this tool has real-world side effects."
+
+**Profiles can override this** by adding a policy overlay that sets the
+tool's decision to `allow`:
+
+```yaml
+# profile's policy overlay
+version: 1
+rules:
+  - id: allow-send-in-pipeline
+    action: tool
+    tool: email/send
+    decision: allow     # profile overrides the plugin's require_approval
+```
+
+Profile overlay rules take precedence over `sensitiveActions`. See `docs/policy.md`.
+
+#### `contributes.policies` — opt-in
+
+Plugins can also ship suggested policy overlay files:
+
+```yaml
+contributes:
+  policies:
+    - id: email/default
+      path: policies/default.yaml
+```
+
+These are registered but **not automatically applied**. The profile must
+explicitly reference them:
+
+```yaml
+# profile.yaml
+spec:
+  policy:
+    overlays:
+      - /path/to/installed/plugin/policies/default.yaml
+```
+
+Or, more commonly, you copy the plugin's policy file into your profile directory
+and reference it locally so your profile is self-contained.
+
+---
+
+## Full example: a plugin that contributes all four types
+
+```yaml
+# my-integration/plugin.yaml
+apiVersion: agent/v1
+kind: Plugin
+metadata:
+  name: my-integration
+  version: 0.1.0
+  description: Full-featured example plugin
+
+spec:
+  category: integration
+  runtime:
+    type: http
+
+  contributes:
+    tools:
+      - id: my/search
+        path: tools/search.yaml
+      - id: my/send
+        path: tools/send.yaml
+
+    prompts:
+      - id: my/style-guide
+        path: prompts/style.md        # referenced as 'my/style-guide' in profiles
+
+    profileTemplates:
+      - id: my/standard-agent
+        path: profiles/standard.yaml  # shown in 'agent doctor' output
+
+    policies:
+      - id: my/default-policy
+        path: policies/default.yaml   # opt-in by profiles
+
+  permissions:
+    sensitiveActions:
+      - my/send                        # auto-requires approval
+
+  configSchema:
+    type: object
+    properties:
+      baseURL:
+        type: string
+      apiKey:
+        type: string
+        secret: true
+    required:
+      - baseURL
+```
+
+A profile using this plugin might look like:
+
+```yaml
+apiVersion: agent/v1
+kind: Profile
+metadata:
+  name: my-agent
+  version: 0.1.0
+
+spec:
+  instructions:
+    system:
+      - ./prompts/base.md
+      - my/style-guide         # includes the plugin's prompt by ID
+
+  provider:
+    default: openai
+    model: gpt-4o
+
+  tools:
+    enabled:
+      - my/search
+      - my/send
+
+  approval:
+    mode: on-request           # pauses on my/send (flagged as sensitiveAction)
+
+  policy:
+    overlays:
+      - ./policies/overrides.yaml  # local file, overrides my/send behavior if desired
+```
+
+---
+
+## Override summary
+
+| Contribution type | Auto-applied? | How to override |
+|---|---|---|
+| `sensitiveActions` | ✅ Yes — approval required | Profile overlay with `decision: allow` or `mode: always` |
+| `contributes.policies` | ❌ No — opt-in only | Profile lists it in `policy.overlays` or ignores it |
+| `contributes.prompts` | ❌ No — opt-in only | Profile references the ID, or writes its own instructions |
+| `contributes.profileTemplates` | ❌ No — reference only | Copy and modify, or ignore entirely |
+
+---
+
 ## Related docs
 
-- `docs/plugins.md`
+- `docs/plugins.md` — plugin CLI workflow (install, configure, enable)
+- `docs/profiles.md` — complete profile reference
+- `docs/policy.md` — policy system, overlay format, override precedence
+- `docs/prompts.md` — system instructions and plugin prompt IDs
 - `docs/plugin-http-example.md`
 - `docs/mcp-bridge.md`
 - `docs/examples/build-an-mcp-plugin.md`
