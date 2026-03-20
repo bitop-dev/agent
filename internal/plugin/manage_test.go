@@ -3,7 +3,6 @@ package plugin
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/ncecere/agent/pkg/config"
@@ -63,7 +62,10 @@ func TestResolveSourceReturnsHelpfulErrorWhenNoSourcesMatch(t *testing.T) {
 	}
 }
 
-func TestResolveSourceMentionsRegistryNotImplemented(t *testing.T) {
+func TestResolveSourceReturnsErrorWhenOnlyRegistryConfigured(t *testing.T) {
+	// resolveSource only checks local paths; registry resolution happens in Install.
+	// When only a registry source is configured and the plugin isn't found locally,
+	// resolveSource should return a "not found" error.
 	_, _, err := resolveSource("send-email", []config.PluginSource{{
 		Name:    "registry",
 		Type:    "registry",
@@ -72,9 +74,6 @@ func TestResolveSourceMentionsRegistryNotImplemented(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("expected error")
-	}
-	if got := err.Error(); !strings.Contains(got, "registry installs are not implemented yet") {
-		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -128,18 +127,17 @@ func TestSearchSourcesReturnsAllWhenQueryEmpty(t *testing.T) {
 	}
 }
 
-func TestSearchSourcesMentionsRegistrySearchNotImplemented(t *testing.T) {
+func TestSearchSourcesReturnsErrorWhenRegistryUnreachable(t *testing.T) {
+	// SearchSources now attempts to reach registry sources. An unreachable URL
+	// should return a network error, not a "not implemented" message.
 	_, err := SearchSources("email", []config.PluginSource{{
 		Name:    "registry",
 		Type:    "registry",
-		URL:     "https://plugins.example.com",
+		URL:     "http://127.0.0.1:19999", // nothing listening here
 		Enabled: true,
 	}})
 	if err == nil {
-		t.Fatal("expected error")
-	}
-	if got := err.Error(); !strings.Contains(got, "registry search is not implemented yet") {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal("expected error for unreachable registry")
 	}
 }
 

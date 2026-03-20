@@ -27,6 +27,10 @@ func InstallLocal(source, destinationRoot string, link bool) (plg.Manifest, stri
 func Install(source string, sources []config.PluginSource, destinationRoot string, link bool) (plg.Manifest, string, error) {
 	manifestPath, sourceDir, err := resolveSource(source, sources)
 	if err != nil {
+		// Local resolution failed. Try registry sources before giving up.
+		if manifest, dest, regErr := installFromRegistry(source, sources, destinationRoot); regErr == nil {
+			return manifest, dest, nil
+		}
 		return plg.Manifest{}, "", err
 	}
 	manifest, err := loaderutil.LoadYAML[plg.Manifest](manifestPath)
@@ -110,15 +114,21 @@ func SearchSources(query string, sources []config.PluginSource) ([]SourceMatch, 
 			matches = append(matches, SourceMatch{Source: source, Manifest: manifest, Path: pluginDir})
 		}
 	}
+	// Search registry sources.
+	if registrySources > 0 {
+		regMatches, err := searchRegistrySources(needle, sources, seen)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, regMatches...)
+	}
+
 	sort.Slice(matches, func(i, j int) bool {
 		if matches[i].Manifest.Metadata.Name == matches[j].Manifest.Metadata.Name {
 			return matches[i].Source.Name < matches[j].Source.Name
 		}
 		return matches[i].Manifest.Metadata.Name < matches[j].Manifest.Metadata.Name
 	})
-	if len(matches) == 0 && registrySources > 0 && needle != "" {
-		return nil, fmt.Errorf("no local matches found; registry search is not implemented yet")
-	}
 	return matches, nil
 }
 
@@ -164,7 +174,6 @@ func resolveSource(source string, sources []config.PluginSource) (manifestPath s
 
 func resolveFromSources(ref string, sources []config.PluginSource) (manifestPath string, sourceDir string, err error) {
 	var checked []string
-	hasRegistry := false
 	for _, source := range sources {
 		if !source.Enabled {
 			continue
@@ -187,17 +196,11 @@ func resolveFromSources(ref string, sources []config.PluginSource) (manifestPath
 				}
 			}
 		case "registry":
-			hasRegistry = true
+			// Registry sources are resolved by Install via installFromRegistry.
 		}
 	}
 	if len(checked) == 0 {
-		if hasRegistry {
-			return "", "", fmt.Errorf("plugin %q was not found locally; registry installs are not implemented yet", ref)
-		}
 		return "", "", fmt.Errorf("plugin source %q not found; pass a local path or configure plugin sources", ref)
-	}
-	if hasRegistry {
-		return "", "", fmt.Errorf("plugin %q not found in configured filesystem sources: %s (registry install not implemented yet)", ref, checked)
 	}
 	return "", "", fmt.Errorf("plugin %q not found in configured sources: %s", ref, checked)
 }
