@@ -273,7 +273,9 @@ func (t DescriptorTool) runHost(ctx context.Context, call tool.Call) (tool.Resul
 			return tool.Result{}, fmt.Errorf("agent/pipeline: steps is required and must be non-empty")
 		}
 		steps := parsePipelineSteps(stepsRaw)
-		pipelineResult, err := t.HostCaps.RunPipeline(ctx, steps)
+		// Use auto-approve for pipeline checkpoints in sub-agents (deny-all context).
+		// In the CLI context, the parent's approval resolver would handle this.
+		pipelineResult, err := t.HostCaps.RunPipeline(ctx, steps, autoApprover{})
 		if err != nil {
 			return tool.Result{}, err
 		}
@@ -586,6 +588,14 @@ func isFlag(s string) bool {
 	return strings.HasPrefix(s, "-")
 }
 
+// autoApprover auto-approves all pipeline checkpoints. Used when the pipeline
+// runs inside a sub-agent where interactive approval isn't available.
+type autoApprover struct{}
+
+func (autoApprover) Approve(_ context.Context, _ pkghost.Checkpoint, _ map[string]string) (bool, error) {
+	return true, nil
+}
+
 func parsePipelineSteps(raw []any) []pkghost.PipelineStep {
 	var steps []pkghost.PipelineStep
 	for _, item := range raw {
@@ -606,6 +616,12 @@ func parsePipelineSteps(raw []any) []pkghost.PipelineStep {
 		}
 		if parallel, ok := m["parallel"].([]any); ok {
 			step.Parallel = parsePipelineSteps(parallel)
+		}
+		if cp, ok := m["checkpoint"].(map[string]any); ok {
+			step.Checkpoint = &pkghost.Checkpoint{
+				Message:  stringFromMap(cp, "message"),
+				Requires: stringFromMap(cp, "requires"),
+			}
 		}
 		steps = append(steps, step)
 	}

@@ -19,12 +19,19 @@ type AgentInfo struct {
 
 // PipelineStep defines one step in an agent pipeline.
 type PipelineStep struct {
-	Agent    string         `json:"agent"`              // profile name
-	Task     string         `json:"task"`               // task template — {{var}} is expanded
-	Context  map[string]any `json:"context,omitempty"`  // structured context — values can use {{var}}
-	As       string         `json:"as,omitempty"`       // variable name to store this step's output
-	MaxTurns int            `json:"maxTurns,omitempty"` // 0 = default
-	Parallel []PipelineStep `json:"parallel,omitempty"` // run these steps concurrently instead of using agent
+	Agent      string         `json:"agent,omitempty"`      // profile name (empty for checkpoint steps)
+	Task       string         `json:"task,omitempty"`       // task template — {{var}} is expanded
+	Context    map[string]any `json:"context,omitempty"`    // structured context — values can use {{var}}
+	As         string         `json:"as,omitempty"`         // variable name to store this step's output
+	MaxTurns   int            `json:"maxTurns,omitempty"`   // 0 = default
+	Parallel   []PipelineStep `json:"parallel,omitempty"`   // run these steps concurrently instead of using agent
+	Checkpoint *Checkpoint    `json:"checkpoint,omitempty"` // pause for human review
+}
+
+// Checkpoint defines a pipeline pause point for human review.
+type Checkpoint struct {
+	Message  string `json:"message"`            // displayed to the user
+	Requires string `json:"requires,omitempty"` // "approval" = must approve to continue
 }
 
 // PipelineResult contains the outcome of a pipeline execution.
@@ -53,7 +60,14 @@ type Capabilities interface {
 	SpawnSubRunParallel(ctx context.Context, reqs []SubRunRequest) ([]SubRunResult, []error)
 	// RunPipeline executes a sequence of agent steps where outputs flow between steps
 	// via template variables. Steps with a Parallel field run concurrently.
-	RunPipeline(ctx context.Context, steps []PipelineStep) (PipelineResult, error)
+	// Steps with a Checkpoint field pause for human review.
+	RunPipeline(ctx context.Context, steps []PipelineStep, approver PipelineApprover) (PipelineResult, error)
+}
+
+// PipelineApprover handles checkpoint approval during pipeline execution.
+type PipelineApprover interface {
+	// Approve is called at checkpoint steps. Returns true to continue, false to abort.
+	Approve(ctx context.Context, checkpoint Checkpoint, stepOutputs map[string]string) (bool, error)
 }
 
 type SubRunRequest struct {

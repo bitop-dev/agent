@@ -52,6 +52,21 @@ type Store interface {
 	Count(ctx context.Context, cwd string) (int, error)
 }
 
+// TaskState represents a persistent long-running task (pipeline or complex workflow).
+type TaskState struct {
+	ID          string            `json:"id"`
+	Profile     string            `json:"profile"`
+	Prompt      string            `json:"prompt"`
+	Status      string            `json:"status"` // "running", "paused", "completed", "failed"
+	CurrentStep int               `json:"currentStep"`
+	TotalSteps  int               `json:"totalSteps"`
+	Outputs     map[string]string `json:"outputs"`
+	SessionID   string            `json:"sessionId"`
+	CWD         string            `json:"cwd"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
+}
+
 func NewID(now time.Time) string {
 	return now.UTC().Format("20060102T150405.000000000")
 }

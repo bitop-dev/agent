@@ -195,11 +195,39 @@ func (c *RuntimeCapabilities) SpawnSubRunParallel(ctx context.Context, reqs []pk
 // RunPipeline executes a sequence of agent steps. Each step's output is stored
 // under its `as` name and available to subsequent steps via {{var}} expansion.
 // Steps with a Parallel field run their sub-steps concurrently.
-func (c *RuntimeCapabilities) RunPipeline(ctx context.Context, steps []pkghost.PipelineStep) (pkghost.PipelineResult, error) {
+func (c *RuntimeCapabilities) RunPipeline(ctx context.Context, steps []pkghost.PipelineStep, approver pkghost.PipelineApprover) (pkghost.PipelineResult, error) {
 	outputs := make(map[string]string)
 	var stepResults []pkghost.PipelineStepResult
 
 	for _, step := range steps {
+		// Checkpoint step — pause for human review.
+		if step.Checkpoint != nil {
+			sr := pkghost.PipelineStepResult{Agent: "checkpoint", As: step.As}
+			if c.Events != nil {
+				c.Events.Publish(ctx, events.Event{
+					Type:    events.TypeApprovalRequest,
+					Message: fmt.Sprintf("[pipeline checkpoint] %s", step.Checkpoint.Message),
+				})
+			}
+			if approver != nil && step.Checkpoint.Requires == "approval" {
+				approved, err := approver.Approve(ctx, *step.Checkpoint, outputs)
+				if err != nil {
+					sr.Error = err.Error()
+					stepResults = append(stepResults, sr)
+					return pkghost.PipelineResult{Steps: stepResults, Outputs: outputs}, fmt.Errorf("checkpoint failed: %w", err)
+				}
+				if !approved {
+					sr.Error = "checkpoint rejected by user"
+					sr.Output = "Pipeline stopped at checkpoint: " + step.Checkpoint.Message
+					stepResults = append(stepResults, sr)
+					return pkghost.PipelineResult{Steps: stepResults, Outputs: outputs}, nil
+				}
+			}
+			sr.Output = "checkpoint passed: " + step.Checkpoint.Message
+			stepResults = append(stepResults, sr)
+			continue
+		}
+
 		// Parallel step — run sub-steps concurrently.
 		if len(step.Parallel) > 0 {
 			var reqs []pkghost.SubRunRequest
