@@ -84,7 +84,7 @@ func registerOne(ctx context.Context, item Discovered, regs Registries) error {
 		if _, exists := regs.Tools.Get(descriptor.ID); exists {
 			continue
 		}
-		if err := regs.Tools.Register(DescriptorTool{PluginName: item.Manifest.Metadata.Name, Descriptor: descriptor, Runtime: item.Manifest.Spec.Runtime, Config: regs.PluginConfigs[item.Manifest.Metadata.Name], HostCaps: regs.HostCapabilities, MCPManager: regs.MCPManager, Manifest: item.Manifest}); err != nil {
+		if err := regs.Tools.Register(DescriptorTool{PluginName: item.Manifest.Metadata.Name, PluginDir: baseDir, Descriptor: descriptor, Runtime: item.Manifest.Spec.Runtime, Config: regs.PluginConfigs[item.Manifest.Metadata.Name], HostCaps: regs.HostCapabilities, MCPManager: regs.MCPManager, Manifest: item.Manifest}); err != nil {
 			return err
 		}
 		registeredTool = true
@@ -143,6 +143,7 @@ func assetRef(item Discovered, baseDir string, contribution plg.Contribution) re
 
 type DescriptorTool struct {
 	PluginName string
+	PluginDir  string // absolute path to the plugin directory; used as cwd for command runtimes
 	Descriptor plg.ToolDescriptor
 	Runtime    plg.Runtime
 	Config     config.PluginConfig
@@ -293,6 +294,14 @@ func (t DescriptorTool) runCommand(ctx context.Context, call tool.Call) (tool.Re
 		envKey := "AGENT_PLUGIN_" + strings.ToUpper(strings.ReplaceAll(k, ".", "_"))
 		env = append(env, envKey+"="+fmt.Sprint(v))
 	}
+	// Apply envMapping: map plugin config keys → env var names.
+	for configKey, envVar := range t.Runtime.EnvMapping {
+		if v, ok := t.Config.Config[configKey]; ok {
+			if s := fmt.Sprint(v); s != "" {
+				env = append(env, envVar+"="+s)
+			}
+		}
+	}
 
 	if len(t.Descriptor.Execution.Argv) > 0 {
 		return t.runCommandArgv(ctx, call, env)
@@ -313,6 +322,9 @@ func (t DescriptorTool) runCommandArgv(ctx context.Context, call tool.Call, env 
 
 	cmd := exec.CommandContext(ctx, t.Runtime.Command[0], args...)
 	cmd.Env = append(cmd.Environ(), env...)
+	if t.PluginDir != "" {
+		cmd.Dir = t.PluginDir
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -354,6 +366,9 @@ func (t DescriptorTool) runCommandJSON(ctx context.Context, call tool.Call, env 
 	args := t.Runtime.Command[1:]
 	cmd := exec.CommandContext(ctx, t.Runtime.Command[0], args...)
 	cmd.Env = append(cmd.Environ(), env...)
+	if t.PluginDir != "" {
+		cmd.Dir = t.PluginDir
+	}
 	cmd.Stdin = bytes.NewReader(input)
 
 	var stdout, stderr bytes.Buffer
