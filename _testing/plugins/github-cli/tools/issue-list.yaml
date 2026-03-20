@@ -1,0 +1,27 @@
+id: gh/issue-list
+kind: tool
+description: List issues in a GitHub repository
+inputSchema:
+  type: object
+  properties:
+    repo:
+      type: string
+      description: Repository in owner/name format
+    state:
+      type: string
+      enum: [open, closed, all]
+      description: Filter by issue state (default open)
+    label:
+      type: string
+      description: Filter by label name
+    limit:
+      type: integer
+      description: Maximum number of results (default 30)
+  required:
+    - repo
+execution:
+  mode: command
+  argv: ["issue", "list", "--repo", "{{repo}}", "--state", "{{state}}", "--label", "{{label}}", "--limit", "{{limit}}", "--json", "number,title,state,url,labels"]
+  timeout: 15
+risk:
+  level: low

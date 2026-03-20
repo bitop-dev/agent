@@ -1,0 +1,24 @@
+id: gh/pr-list
+kind: tool
+description: List pull requests in a GitHub repository
+inputSchema:
+  type: object
+  properties:
+    repo:
+      type: string
+      description: Repository in owner/name format
+    state:
+      type: string
+      enum: [open, closed, merged, all]
+      description: Filter by PR state (default open)
+    limit:
+      type: integer
+      description: Maximum number of results (default 30)
+  required:
+    - repo
+execution:
+  mode: command
+  argv: ["pr", "list", "--repo", "{{repo}}", "--state", "{{state}}", "--limit", "{{limit}}", "--json", "number,title,state,url,author"]
+  timeout: 15
+risk:
+  level: low

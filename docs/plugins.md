@@ -4,6 +4,14 @@ This project supports installing local plugin bundles, mutating plugin config fr
 
 Plugin config is stored in `~/.agent/config.yaml` under `plugins.<name>.config`.
 
+If you want the conceptual overview first, start with:
+
+- `docs/building-plugins.md`
+- `docs/plugin-runtime-choices.md`
+- `docs/examples/build-a-web-research-plugin.md`
+- `docs/examples/build-a-send-email-plugin.md`
+- `docs/plugin-author-checklist.md`
+
 ## Common commands
 
 ```bash

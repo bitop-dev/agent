@@ -1,0 +1,17 @@
+id: json/echo
+kind: tool
+description: Echo back the input with optional prefix (demonstrates JSON-stdin/stdout command runtime)
+inputSchema:
+  type: object
+  properties:
+    message:
+      type: string
+      description: Message to echo back
+  required:
+    - message
+execution:
+  mode: command
+  operation: echo
+  timeout: 5
+risk:
+  level: low

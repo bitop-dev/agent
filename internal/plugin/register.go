@@ -1,12 +1,14 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -142,6 +144,8 @@ func (t DescriptorTool) Run(ctx context.Context, call tool.Call) (tool.Result, e
 		return t.runHost(ctx, call)
 	case plg.RuntimeMCP:
 		return t.runMCP(ctx, call)
+	case plg.RuntimeCommand:
+		return t.runCommand(ctx, call)
 	default:
 		return tool.Result{}, fmt.Errorf("plugin tool %s from %s is registered but runtime mode %s execution is not implemented yet", t.Descriptor.ID, t.PluginName, t.Runtime.Type)
 	}
@@ -250,4 +254,186 @@ func (t DescriptorTool) runHTTP(ctx context.Context, call tool.Call) (tool.Resul
 		return tool.Result{ToolID: call.ToolID, Output: decoded.Output, Data: decoded.Data}, nil
 	}
 	return tool.Result{ToolID: call.ToolID, Output: string(responseBody)}, nil
+}
+
+func (t DescriptorTool) runCommand(ctx context.Context, call tool.Call) (tool.Result, error) {
+	if len(t.Runtime.Command) == 0 {
+		return tool.Result{}, fmt.Errorf("plugin %s: command runtime requires runtime.command", t.PluginName)
+	}
+
+	timeout := 30 * time.Second
+	if t.Descriptor.Execution.Timeout > 0 {
+		timeout = time.Duration(t.Descriptor.Execution.Timeout) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Build environment variables from plugin config.
+	var env []string
+	for k, v := range t.Config.Config {
+		envKey := "AGENT_PLUGIN_" + strings.ToUpper(strings.ReplaceAll(k, ".", "_"))
+		env = append(env, envKey+"="+fmt.Sprint(v))
+	}
+
+	if len(t.Descriptor.Execution.Argv) > 0 {
+		return t.runCommandArgv(ctx, call, env)
+	}
+	return t.runCommandJSON(ctx, call, env)
+}
+
+// runCommandArgv handles argv-template mode for wrapping existing CLIs.
+// Template variables {{name}} are expanded from call.Arguments.
+// If a value is empty/missing and the preceding element is a flag (--flag),
+// both the flag and placeholder are omitted.
+func (t DescriptorTool) runCommandArgv(ctx context.Context, call tool.Call, env []string) (tool.Result, error) {
+	expanded := expandArgvTemplate(t.Descriptor.Execution.Argv, call.Arguments, t.Config.Config)
+
+	args := make([]string, 0, len(t.Runtime.Command)-1+len(expanded))
+	args = append(args, t.Runtime.Command[1:]...)
+	args = append(args, expanded...)
+
+	cmd := exec.CommandContext(ctx, t.Runtime.Command[0], args...)
+	cmd.Env = append(cmd.Environ(), env...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = strings.TrimSpace(stdout.String())
+		}
+		if detail != "" {
+			return tool.Result{}, fmt.Errorf("plugin %s tool %s command failed: %w: %s", t.PluginName, t.Descriptor.ID, err, detail)
+		}
+		return tool.Result{}, fmt.Errorf("plugin %s tool %s command failed: %w", t.PluginName, t.Descriptor.ID, err)
+	}
+
+	return tool.Result{
+		ToolID: call.ToolID,
+		Output: strings.TrimSpace(stdout.String()),
+	}, nil
+}
+
+// runCommandJSON handles JSON-stdin/stdout mode for custom binaries and scripts.
+// Input: JSON {"plugin","tool","operation","arguments","config"} on stdin
+// Output: JSON {"output","data","error"} on stdout, or raw text fallback
+func (t DescriptorTool) runCommandJSON(ctx context.Context, call tool.Call, env []string) (tool.Result, error) {
+	payload := map[string]any{
+		"plugin":    t.PluginName,
+		"tool":      t.Descriptor.ID,
+		"operation": t.Descriptor.Execution.Operation,
+		"arguments": call.Arguments,
+		"config":    t.Config.Config,
+	}
+	input, err := json.Marshal(payload)
+	if err != nil {
+		return tool.Result{}, fmt.Errorf("plugin %s: marshal command input: %w", t.PluginName, err)
+	}
+
+	args := t.Runtime.Command[1:]
+	cmd := exec.CommandContext(ctx, t.Runtime.Command[0], args...)
+	cmd.Env = append(cmd.Environ(), env...)
+	cmd.Stdin = bytes.NewReader(input)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = strings.TrimSpace(stdout.String())
+		}
+		if detail != "" {
+			return tool.Result{}, fmt.Errorf("plugin %s tool %s command failed: %w: %s", t.PluginName, t.Descriptor.ID, err, detail)
+		}
+		return tool.Result{}, fmt.Errorf("plugin %s tool %s command failed: %w", t.PluginName, t.Descriptor.ID, err)
+	}
+
+	// Try to parse structured JSON output.
+	raw := stdout.Bytes()
+	var decoded struct {
+		Output string         `json:"output"`
+		Data   map[string]any `json:"data"`
+		Error  string         `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err == nil && (decoded.Output != "" || decoded.Data != nil || decoded.Error != "") {
+		if decoded.Error != "" {
+			return tool.Result{}, errors.New(decoded.Error)
+		}
+		return tool.Result{ToolID: call.ToolID, Output: decoded.Output, Data: decoded.Data}, nil
+	}
+
+	// Fallback: treat stdout as plain text output.
+	return tool.Result{ToolID: call.ToolID, Output: strings.TrimSpace(string(raw))}, nil
+}
+
+// expandArgvTemplate replaces {{name}} placeholders in an argv template.
+// Values are resolved from args first, then from cfg with a "config." prefix.
+// If a placeholder resolves to empty and the preceding element looks like a flag
+// (starts with "-"), both the flag and the placeholder are omitted.
+func expandArgvTemplate(argv []string, args map[string]any, cfg map[string]any) []string {
+	result := make([]string, 0, len(argv))
+	skip := false
+
+	for i, elem := range argv {
+		if skip {
+			skip = false
+			continue
+		}
+
+		if !isTemplatePlaceholder(elem) {
+			result = append(result, elem)
+			continue
+		}
+
+		key := elem[2 : len(elem)-2] // strip {{ and }}
+		val := resolveTemplateValue(key, args, cfg)
+
+		if val == "" {
+			// Check if next element is also a placeholder (this element is a flag).
+			// Actually check if THIS element's predecessor is a flag.
+			// Re-check: if the PREVIOUS result element is a flag and val is empty, pop it.
+			if len(result) > 0 && isFlag(result[len(result)-1]) {
+				result = result[:len(result)-1]
+			}
+			continue
+		}
+
+		result = append(result, val)
+
+		// Look ahead: if the next element is a template that resolves to empty,
+		// and current element is a flag, we'll handle it when we get there.
+		_ = i
+	}
+
+	return result
+}
+
+func isTemplatePlaceholder(s string) bool {
+	return len(s) > 4 && strings.HasPrefix(s, "{{") && strings.HasSuffix(s, "}}")
+}
+
+func isFlag(s string) bool {
+	return strings.HasPrefix(s, "-")
+}
+
+func resolveTemplateValue(key string, args map[string]any, cfg map[string]any) string {
+	if strings.HasPrefix(key, "config.") {
+		cfgKey := strings.TrimPrefix(key, "config.")
+		if v, ok := cfg[cfgKey]; ok {
+			return fmt.Sprint(v)
+		}
+		return ""
+	}
+	if v, ok := args[key]; ok {
+		s := fmt.Sprint(v)
+		if s == "<nil>" {
+			return ""
+		}
+		return s
+	}
+	return ""
 }

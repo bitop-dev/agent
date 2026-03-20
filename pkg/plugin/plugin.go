@@ -110,8 +110,10 @@ type ToolDescriptor struct {
 }
 
 type ToolExecution struct {
-	Mode      string `yaml:"mode,omitempty"`
-	Operation string `yaml:"operation,omitempty"`
+	Mode      string   `yaml:"mode,omitempty"`
+	Operation string   `yaml:"operation,omitempty"`
+	Argv      []string `yaml:"argv,omitempty"`
+	Timeout   int      `yaml:"timeout,omitempty"`
 }
 
 type ToolRisk struct {

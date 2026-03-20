@@ -1,0 +1,33 @@
+apiVersion: agent/v1
+kind: Plugin
+metadata:
+  name: github-cli
+  version: 0.1.0
+  description: GitHub CLI integration via command runtime (argv-template mode)
+spec:
+  category: integration
+  runtime:
+    type: command
+    command: ["gh"]
+  contributes:
+    tools:
+      - id: gh/pr-list
+        path: tools/pr-list.yaml
+      - id: gh/issue-list
+        path: tools/issue-list.yaml
+      - id: gh/repo-view
+        path: tools/repo-view.yaml
+    prompts: []
+    profileTemplates: []
+    policies: []
+  configSchema:
+    type: object
+    properties: {}
+    required: []
+  permissions:
+    network:
+      outbound:
+        - https
+  requires:
+    framework: ">=0.1.0"
+    plugins: []

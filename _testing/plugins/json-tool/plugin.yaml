@@ -1,0 +1,30 @@
+apiVersion: agent/v1
+kind: Plugin
+metadata:
+  name: json-tool
+  version: 0.1.0
+  description: Example command plugin using JSON-stdin/stdout mode (custom binary)
+spec:
+  category: integration
+  runtime:
+    type: command
+    command: ["./bin/json-echo"]
+  contributes:
+    tools:
+      - id: json/echo
+        path: tools/echo.yaml
+    prompts: []
+    profileTemplates: []
+    policies: []
+  configSchema:
+    type: object
+    properties:
+      prefix:
+        type: string
+    required: []
+  permissions:
+    network:
+      outbound: []
+  requires:
+    framework: ">=0.1.0"
+    plugins: []
