@@ -38,6 +38,13 @@ func RegisterDiscovered(ctx context.Context, loader Loader, regs Registries) err
 	if err != nil {
 		return err
 	}
+	// Build a set of enabled plugin names for dependency checking.
+	enabledSet := make(map[string]bool, len(discovered))
+	for _, item := range discovered {
+		if item.Reference.Enabled {
+			enabledSet[item.Manifest.Metadata.Name] = true
+		}
+	}
 	for _, item := range discovered {
 		if !item.Reference.Enabled {
 			continue
@@ -47,6 +54,12 @@ func RegisterDiscovered(ctx context.Context, loader Loader, regs Registries) err
 		}
 		if err := ValidateConfig(item.Manifest, regs.PluginConfigs[item.Manifest.Metadata.Name]); err != nil {
 			return err
+		}
+		// Check plugin dependencies are installed and enabled.
+		for _, dep := range item.Manifest.Spec.Requires.Plugins {
+			if !enabledSet[dep] {
+				return fmt.Errorf("plugin %s requires plugin %q which is not installed or enabled", item.Manifest.Metadata.Name, dep)
+			}
 		}
 		if err := registerOne(ctx, item, regs); err != nil {
 			return fmt.Errorf("register plugin %s: %w", item.Manifest.Metadata.Name, err)
