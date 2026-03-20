@@ -31,7 +31,8 @@ type InstallResult struct {
 	Manifest    plg.Manifest
 	Destination string
 	Version     string
-	Source      string // "local" for path installs, or the configured source name
+	Source      string             // "local" for path installs, or the configured source name
+	Deps        []DepInstallResult // dependencies that were auto-installed
 }
 
 // InstallOptions controls how an install is resolved.
@@ -39,6 +40,14 @@ type InstallOptions struct {
 	Link         bool   // symlink instead of copy (local installs only)
 	SourceFilter string // if non-empty, only consider this source name
 	Version      string // if non-empty, install this exact version (registry only)
+	SkipDeps     bool   // if true, don't auto-install dependencies
+}
+
+// DepInstallResult records a dependency that was auto-installed.
+type DepInstallResult struct {
+	Name    string
+	Version string
+	Source  string
 }
 
 // ParseNameVersion splits "name@version" into name and version.
@@ -111,12 +120,72 @@ func Install(source string, sources []config.PluginSource, destinationRoot strin
 			break
 		}
 	}
-	return InstallResult{
+	result := InstallResult{
 		Manifest:    manifest,
 		Destination: destinationDir,
 		Version:     manifest.Metadata.Version,
 		Source:      sourceName,
-	}, nil
+	}
+
+	// Auto-install missing dependencies from the same sources.
+	if !opts.SkipDeps {
+		installing := map[string]bool{manifest.Metadata.Name: true}
+		deps, err := ResolveDependencies(manifest, sources, destinationRoot, installing)
+		if err != nil {
+			// Dependency failed — the primary plugin is still installed.
+			// Return success with the error noted so the CLI can report it.
+			result.Deps = deps
+			return result, fmt.Errorf("installed %s but dependency resolution failed: %w", manifest.Metadata.Name, err)
+		}
+		result.Deps = deps
+	}
+
+	return result, nil
+}
+
+// ResolveDependencies checks the manifest's requires.plugins and auto-installs
+// any missing dependencies from the same configured sources. Dependencies are
+// installed but NOT enabled — the user must enable and configure them manually.
+//
+// Returns the list of dependencies that were installed. Already-installed
+// dependencies are silently skipped. Circular dependencies are detected and
+// prevented via the installing set.
+func ResolveDependencies(manifest plg.Manifest, sources []config.PluginSource, destinationRoot string, installing map[string]bool) ([]DepInstallResult, error) {
+	if len(manifest.Spec.Requires.Plugins) == 0 {
+		return nil, nil
+	}
+
+	var installed []DepInstallResult
+	for _, dep := range manifest.Spec.Requires.Plugins {
+		// Skip if already installed on disk.
+		depDir := filepath.Join(destinationRoot, dep)
+		if _, err := os.Stat(depDir); err == nil {
+			continue
+		}
+		// Skip if we're already in the process of installing this dep (circular).
+		if installing[dep] {
+			continue
+		}
+		installing[dep] = true
+
+		result, err := Install(dep, sources, destinationRoot, InstallOptions{SkipDeps: false})
+		if err != nil {
+			return installed, fmt.Errorf("auto-install dependency %q (required by %s): %w", dep, manifest.Metadata.Name, err)
+		}
+		installed = append(installed, DepInstallResult{
+			Name:    result.Manifest.Metadata.Name,
+			Version: result.Version,
+			Source:  result.Source,
+		})
+
+		// Recurse: the dependency itself may have dependencies.
+		transitive, err := ResolveDependencies(result.Manifest, sources, destinationRoot, installing)
+		if err != nil {
+			return installed, err
+		}
+		installed = append(installed, transitive...)
+	}
+	return installed, nil
 }
 
 // Upgrade removes the currently installed version of a plugin and reinstalls

@@ -657,11 +657,21 @@ func runPluginLifecycle(ctx context.Context, app service.App, args []string) err
 			return err
 		}
 		cfg.SetPluginInstallRecord(result.Manifest.Metadata.Name, result.Version, result.Source)
+		// Record auto-installed dependencies.
+		for _, dep := range result.Deps {
+			cfg.SetPluginInstallRecord(dep.Name, dep.Version, dep.Source)
+		}
 		if err := config.Save(app.Paths, cfg); err != nil {
 			return err
 		}
 		fmt.Printf("installed\t%s@%s\t(source: %s)\t%s\n",
 			result.Manifest.Metadata.Name, result.Version, result.Source, result.Destination)
+		for _, dep := range result.Deps {
+			fmt.Printf("  dep\t%s@%s\t(auto-installed, source: %s)\n", dep.Name, dep.Version, dep.Source)
+		}
+		if len(result.Deps) > 0 {
+			fmt.Printf("\n%d dependency(ies) installed. Run 'plugins config' and 'plugins enable' for each before use.\n", len(result.Deps))
+		}
 		return nil
 
 	case "upgrade":
