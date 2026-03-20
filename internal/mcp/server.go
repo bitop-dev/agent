@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Server implements an MCP tool server over stdio. It exposes agent profiles
@@ -16,6 +18,7 @@ type Server struct {
 	name    string
 	version string
 	tools   []ServerTool
+	mu      sync.Mutex
 	writer  io.Writer
 }
 
@@ -112,16 +115,47 @@ func (s *Server) Serve(ctx context.Context, reader io.Reader, writer io.Writer) 
 				s.respondError(id, -32601, fmt.Sprintf("tool %q not found", params.Name))
 				continue
 			}
-			output, err := handler(ctx, params.Arguments)
-			if err != nil {
+			// Run the handler in a goroutine and send periodic log notifications
+			// to keep the connection alive during long-running agent tasks.
+			resultCh := make(chan struct {
+				output string
+				err    error
+			}, 1)
+			go func() {
+				output, err := handler(ctx, params.Arguments)
+				resultCh <- struct {
+					output string
+					err    error
+				}{output, err}
+			}()
+
+			ticker := time.NewTicker(5 * time.Second)
+			elapsed := 0
+			var result struct {
+				output string
+				err    error
+			}
+		waitLoop:
+			for {
+				select {
+				case result = <-resultCh:
+					break waitLoop
+				case <-ticker.C:
+					elapsed += 5
+					s.sendLogNotification(fmt.Sprintf("agent working... (%ds)", elapsed))
+				}
+			}
+			ticker.Stop()
+
+			if result.err != nil {
 				s.respond(id, map[string]any{
-					"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("error: %v", err)}},
+					"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("error: %v", result.err)}},
 					"isError": true,
 				})
 				continue
 			}
 			s.respond(id, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": output}},
+				"content": []map[string]any{{"type": "text", "text": result.output}},
 				"isError": false,
 			})
 
@@ -133,6 +167,8 @@ func (s *Server) Serve(ctx context.Context, reader io.Reader, writer io.Writer) 
 }
 
 func (s *Server) respond(id int64, result any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	resp := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      id,
@@ -143,11 +179,30 @@ func (s *Server) respond(id int64, result any) {
 }
 
 func (s *Server) respondError(id int64, code int, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	resp := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      id,
 		"error":   map[string]any{"code": code, "message": message},
 	}
 	data, _ := json.Marshal(resp)
+	fmt.Fprintf(s.writer, "%s\n", data)
+}
+
+// sendLogNotification sends an MCP logging notification to keep the connection
+// alive during long-running tool calls.
+func (s *Server) sendLogNotification(message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	notif := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/message",
+		"params": map[string]any{
+			"level": "info",
+			"data":  message,
+		},
+	}
+	data, _ := json.Marshal(notif)
 	fmt.Fprintf(s.writer, "%s\n", data)
 }

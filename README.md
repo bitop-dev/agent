@@ -29,6 +29,12 @@ go run ./cmd/agent resume --session abc123
 - **Session persistence** — SQLite-backed sessions with export and replay
 - **Registry integration** — remote plugin search, install, and publish against `agent-registry`
 - **Parallel sub-agents** — orchestrate concurrent sub-agent runs via the host runtime
+- **Agent discovery** — `agent/discover` tool lets orchestrators find agents dynamically
+- **Structured handoff** — pass context (date, constraints, prior results) to sub-agents
+- **MCP server mode** — `agent serve --profile <name>` exposes agents as MCP tools
+- **Sub-agent progress** — parent sees child tool calls in real time with `[sub:profile]` prefix
+- **Transitive dependencies** — `plugins install` auto-installs missing `requires.plugins`
+- **Session compaction** — pi-mono style structured summarization for long conversations
 
 ## Installation
 
@@ -44,21 +50,43 @@ go build -o bin/agent ./cmd/agent
 # Search the registry
 agent plugins search email
 
-# Install from registry
+# Install (auto-installs dependencies)
 agent plugins install send-email --source official
+agent plugins install grafana-alerts@0.1.0
 
-# Install from local path
-agent plugins install ../agent-plugins/send-email --link
-
-# Upgrade
+# Upgrade and publish
 agent plugins upgrade send-email
-
-# Publish to registry
 agent plugins publish ../agent-plugins/my-plugin --registry official
 
-# Configure a plugin
+# Configure
 agent plugins config set send-email baseURL http://localhost:3001
 ```
+
+## MCP server mode
+
+Expose any agent profile as an MCP tool for external clients:
+
+```bash
+# Start as MCP server (stdio transport)
+agent serve --profile researcher
+```
+
+Configure in Claude Desktop, Cursor, or opencode:
+
+```json
+{
+  "mcp": {
+    "researcher": {
+      "type": "local",
+      "command": ["agent", "serve", "--profile", "researcher"]
+    }
+  }
+}
+```
+
+External clients see the agent as a single callable tool with the profile's
+name, description, and capabilities. The agent runs its full tool chain
+internally and returns the final output.
 
 ## Related repos
 
