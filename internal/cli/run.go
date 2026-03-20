@@ -15,6 +15,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	internalmcp "github.com/bitop-dev/agent/internal/mcp"
 	internalplugin "github.com/bitop-dev/agent/internal/plugin"
 	"github.com/bitop-dev/agent/internal/registry"
 	"github.com/bitop-dev/agent/internal/service"
@@ -52,6 +53,8 @@ func dispatch(ctx context.Context, app service.App, args []string) error {
 		return nil
 	case "chat":
 		return chatCommand(ctx, app, args[1:])
+	case "serve":
+		return serveCommand(ctx, app, args[1:])
 	case "run":
 		return runCommand(ctx, app, args[1:])
 	case "resume":
@@ -69,6 +72,91 @@ func dispatch(ctx context.Context, app service.App, args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func serveCommand(ctx context.Context, app service.App, args []string) error {
+	profileRef := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--profile":
+			if i+1 >= len(args) {
+				return errors.New("--profile requires a value")
+			}
+			profileRef = args[i+1]
+			i++
+		}
+	}
+	if profileRef == "" {
+		return errors.New("serve requires --profile")
+	}
+	manifest, _, err := app.Profiles.Load(ctx, profileRef)
+	if err != nil {
+		return fmt.Errorf("profile %q not found", profileRef)
+	}
+
+	// Build the MCP tool definition from the profile.
+	toolSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"task": map[string]any{
+				"type":        "string",
+				"description": "The task for this agent to execute",
+			},
+		},
+		"required": []string{"task"},
+	}
+	// Add context parameter if the profile has capabilities metadata.
+	if manifest.Metadata.Accepts != "" {
+		toolSchema["properties"].(map[string]any)["context"] = map[string]any{
+			"type":        "object",
+			"description": "Structured context: date, constraints, prior results, etc.",
+		}
+	}
+
+	agentTool := internalmcp.ServerTool{
+		Name:        manifest.Metadata.Name,
+		Description: manifest.Metadata.Description,
+		InputSchema: toolSchema,
+		Handler: func(toolCtx context.Context, arguments map[string]any) (string, error) {
+			task, _ := arguments["task"].(string)
+			if strings.TrimSpace(task) == "" {
+				return "", errors.New("task is required")
+			}
+			// Load full profile for each call (in case it was updated).
+			m, path, err := app.Profiles.Load(toolCtx, profileRef)
+			if err != nil {
+				return "", err
+			}
+			providerImpl, err := app.ResolveProvider(m.Spec.Provider.Default)
+			if err != nil {
+				return "", err
+			}
+			tools, err := app.ResolveTools(m.Spec.Tools.Enabled)
+			if err != nil {
+				return "", err
+			}
+			workspaceRef, _ := workspace.Resolve(app.Paths.CWD)
+			// Use stderr for events — stdout is the MCP protocol pipe.
+			result, err := executeServeRun(toolCtx, app, runInput{
+				Prompt:       task,
+				Manifest:     m,
+				ProfilePath:  path,
+				ProviderImpl: providerImpl,
+				Tools:        tools,
+				Workspace:    workspaceRef,
+				NoSession:    true,
+				CWD:          app.Paths.CWD,
+			})
+			if err != nil {
+				return "", err
+			}
+			return result.Output, nil
+		},
+	}
+
+	server := internalmcp.NewServer("agent", "0.2.0", []internalmcp.ServerTool{agentTool})
+	fmt.Fprintf(os.Stderr, "MCP server started: profile=%s tool=%s\n", manifest.Metadata.Name, manifest.Metadata.Name)
+	return server.Serve(ctx, os.Stdin, os.Stdout)
 }
 
 func runCommand(ctx context.Context, app service.App, args []string) error {
@@ -1145,6 +1233,7 @@ func printUsage() {
 	fmt.Printf("%s <command>\n\n", prog)
 	fmt.Println("Commands:")
 	fmt.Println("  chat                    Start an interactive session")
+	fmt.Println("  serve --profile <ref>   Start as an MCP tool server (stdio transport)")
 	fmt.Println("  run                     Execute a one-shot run")
 	fmt.Println("  resume                  Resume a previous session with a new prompt")
 	fmt.Println("  profiles list                               List discoverable profiles")
@@ -1411,6 +1500,28 @@ type sessionView struct {
 	Profile string
 	CWD     string
 	Entries []session.Entry
+}
+
+// executeServeRun is like executeRun but sends events to stderr instead of stdout.
+// Used by the MCP serve command where stdout is the JSON-RPC protocol pipe.
+func executeServeRun(ctx context.Context, app service.App, input runInput) (pkgruntime.RunResult, error) {
+	eventSink := streamSink{Writer: os.Stderr}
+	if app.HostCaps != nil {
+		app.HostCaps.Events = eventSink
+	}
+	runReq := pkgruntime.RunRequest{
+		Prompt:       input.Prompt,
+		SystemPrompt: loadSystemInstructions(input.ProfilePath, input.Manifest.Spec.Instructions.System, app.Prompts),
+		Profile:      input.Manifest,
+		Provider:     input.ProviderImpl,
+		Tools:        input.Tools,
+		Policy:       app.BuildPolicy(input.Workspace, input.Manifest, input.ProfilePath),
+		Approvals:    app.BuildApprovalResolver(firstNonEmpty(input.ApprovalMode, input.Manifest.Spec.Approval.Mode)),
+		Events:       eventSink,
+		Execution:    pkgruntime.ExecutionContext{CWD: input.CWD, SessionID: input.SessionID, ProfileRef: input.ProfilePath, Workspace: input.Workspace},
+		Transcript:   input.Transcript,
+	}
+	return app.Runner.Run(ctx, runReq)
 }
 
 func executeRun(ctx context.Context, app service.App, input runInput) (pkgruntime.RunResult, error) {
