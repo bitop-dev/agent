@@ -89,6 +89,7 @@ func Bootstrap(cwd string) (App, error) {
 		Tools:      toolRegistry,
 		Providers:  providerRegistry,
 		Prompts:    promptRegistry,
+		GatewayURL: os.Getenv("GATEWAY_URL"),
 		DefaultCWD: paths.CWD,
 		MaxDepth:   2,
 	}

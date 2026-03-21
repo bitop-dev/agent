@@ -31,6 +31,7 @@ type RuntimeCapabilities struct {
 	Providers    *registry.ProviderRegistry
 	Prompts      *registry.PromptRegistry
 	Events       events.Sink // parent event sink — sub-agent events are forwarded here with a prefix
+	GatewayURL   string      // if set, parallel sub-agents are dispatched through the gateway for true distribution
 	DefaultCWD   string
 	MaxDepth     int
 	currentDepth int
@@ -219,9 +220,13 @@ func (c *RuntimeCapabilities) SpawnSubRun(ctx context.Context, req pkghost.SubRu
 }
 
 // SpawnSubRunParallel runs multiple sub-agent tasks concurrently.
-// Results are returned in the same order as the input requests.
-// Individual sub-agent errors are collected and returned alongside results.
+// When GatewayURL is configured, tasks are dispatched through the gateway
+// for true distribution across k8s pods. Otherwise falls back to local goroutines.
 func (c *RuntimeCapabilities) SpawnSubRunParallel(ctx context.Context, reqs []pkghost.SubRunRequest) ([]pkghost.SubRunResult, []error) {
+	if c.GatewayURL != "" && len(reqs) > 1 {
+		return c.parallelViaGateway(ctx, reqs)
+	}
+	// Local goroutine fallback.
 	results := make([]pkghost.SubRunResult, len(reqs))
 	errs := make([]error, len(reqs))
 	var wg sync.WaitGroup
@@ -233,6 +238,72 @@ func (c *RuntimeCapabilities) SpawnSubRunParallel(ctx context.Context, reqs []pk
 		}(i, req)
 	}
 	wg.Wait()
+	return results, errs
+}
+
+// parallelViaGateway dispatches sub-tasks through the gateway's /v1/tasks/parallel
+// endpoint for true distribution across k8s worker pods.
+func (c *RuntimeCapabilities) parallelViaGateway(ctx context.Context, reqs []pkghost.SubRunRequest) ([]pkghost.SubRunResult, []error) {
+	type gatewayTask struct {
+		Profile string         `json:"profile"`
+		Task    string         `json:"task"`
+		Context map[string]any `json:"context,omitempty"`
+	}
+	tasks := make([]gatewayTask, len(reqs))
+	for i, req := range reqs {
+		profile := req.Profile
+		if profile == "" {
+			profile = "researcher"
+		}
+		task := req.Task
+		if len(req.Context) > 0 {
+			task = formatHandoffContext(req.Context) + "\n\n" + task
+		}
+		tasks[i] = gatewayTask{Profile: profile, Task: task}
+	}
+
+	body := map[string]any{"tasks": tasks}
+	data, _ := json.Marshal(body)
+
+	url := strings.TrimRight(c.GatewayURL, "/") + "/v1/tasks/parallel"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(data)))
+	if err != nil {
+		return nil, []error{err}
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Minute}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, []error{fmt.Errorf("gateway parallel dispatch: %w", err)}
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Tasks []struct {
+			Status   string `json:"status"`
+			Output   string `json:"output"`
+			Error    string `json:"error"`
+			WorkerURL string `json:"workerUrl"`
+		} `json:"tasks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, []error{fmt.Errorf("gateway parallel decode: %w", err)}
+	}
+
+	results := make([]pkghost.SubRunResult, len(reqs))
+	errs := make([]error, len(reqs))
+	for i := range result.Tasks {
+		if i >= len(results) {
+			break
+		}
+		t := result.Tasks[i]
+		if t.Status == "failed" || t.Error != "" {
+			errs[i] = fmt.Errorf("%s", t.Error)
+		} else {
+			results[i] = pkghost.SubRunResult{Output: t.Output}
+		}
+	}
 	return results, errs
 }
 
