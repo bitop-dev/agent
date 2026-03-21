@@ -76,10 +76,14 @@ func Bootstrap(cwd string) (App, error) {
 	promptRegistry := registry.NewPromptRegistry()
 	profileTemplateRegistry := registry.NewProfileTemplateRegistry()
 	policyRegistry := registry.NewPolicyRegistry()
-	profileLoaderInst := profileloader.Loader{Roots: []string{
-		paths.LocalProfilesDir,
-		paths.UserProfilesDir,
-	}}
+	profileLoaderInst := profileloader.Loader{
+		Roots: []string{
+			paths.LocalProfilesDir,
+			paths.UserProfilesDir,
+		},
+		InstallRoot:   paths.UserProfilesDir,
+		PluginSources: cfg.PluginSources,
+	}
 	hostCaps := &internalhost.RuntimeCapabilities{
 		Profiles:   profileLoaderInst,
 		Tools:      toolRegistry,
