@@ -66,11 +66,12 @@ func (p Provider) runChat(ctx context.Context, req provider.CompletionRequest, c
 	}
 	// Request usage reporting in the response.
 	body := chatRequest{
-		Model:      req.Model.Model,
-		Messages:   toChatMessages(req),
-		Tools:      tools,
-		ToolChoice: toolChoice,
-		Stream:     true,
+		Model:         req.Model.Model,
+		Messages:      toChatMessages(req),
+		Tools:         tools,
+		ToolChoice:    toolChoice,
+		Stream:        true,
+		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
 	if strings.TrimSpace(req.System) != "" {
 		body.Messages = append([]chatMessage{{Role: "system", Content: req.System}}, body.Messages...)
@@ -164,6 +165,14 @@ func (p Provider) streamChat(ctx context.Context, body chatRequest, nameMap map[
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
 		}
+		// Extract usage from final chunk (stream_options.include_usage)
+		if chunk.Usage != nil {
+			ch <- provider.StreamEvent{
+				Type:         provider.StreamEventDone,
+				InputTokens:  chunk.Usage.PromptTokens,
+				OutputTokens: chunk.Usage.CompletionTokens,
+			}
+		}
 		if len(chunk.Choices) == 0 {
 			continue
 		}
@@ -242,6 +251,14 @@ func (p Provider) runResponses(ctx context.Context, req provider.CompletionReque
 	}
 	if joined := strings.TrimSpace(strings.Join(textParts, "\n")); joined != "" {
 		ch <- provider.StreamEvent{Type: provider.StreamEventText, Text: joined}
+	}
+	// Emit usage from responses API.
+	if resp.Usage != nil {
+		ch <- provider.StreamEvent{
+			Type:         provider.StreamEventDone,
+			InputTokens:  resp.Usage.InputTokens,
+			OutputTokens: resp.Usage.OutputTokens,
+		}
 	}
 	return nil
 }
@@ -435,11 +452,16 @@ func mustJSON(value any) string {
 }
 
 type chatRequest struct {
-	Model      string        `json:"model"`
-	Messages   []chatMessage `json:"messages"`
-	Tools      []chatTool    `json:"tools,omitempty"`
-	ToolChoice string        `json:"tool_choice,omitempty"`
-	Stream     bool          `json:"stream,omitempty"`
+	Model         string         `json:"model"`
+	Messages      []chatMessage  `json:"messages"`
+	Tools         []chatTool     `json:"tools,omitempty"`
+	ToolChoice    string         `json:"tool_choice,omitempty"`
+	Stream        bool           `json:"stream,omitempty"`
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type chatStreamChunk struct {
@@ -456,6 +478,11 @@ type chatStreamChunk struct {
 			} `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage,omitempty"`
 }
 
 type chatMessage struct {
@@ -538,6 +565,11 @@ type responsesTool struct {
 type responsesResponse struct {
 	OutputText string                `json:"output_text"`
 	Output     []responsesOutputItem `json:"output"`
+	Usage      *struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage,omitempty"`
 }
 
 type responsesOutputItem struct {
