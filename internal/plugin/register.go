@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -205,6 +206,57 @@ func (t DescriptorTool) runHost(ctx context.Context, call tool.Call) (tool.Resul
 		return tool.Result{}, fmt.Errorf("plugin tool %s requires host capabilities but none are configured", t.Descriptor.ID)
 	}
 	switch t.Descriptor.Execution.Operation {
+	case "agent-remember":
+		profile, _ := call.Arguments["profile"].(string)
+		key, _ := call.Arguments["key"].(string)
+		value, _ := call.Arguments["value"].(string)
+		if key == "" || value == "" {
+			return tool.Result{}, fmt.Errorf("agent/remember: key and value are required")
+		}
+		if profile == "" {
+			profile = t.PluginName
+		}
+		// Store via gateway if configured, otherwise log locally.
+		if gatewayURL := os.Getenv("GATEWAY_URL"); gatewayURL != "" {
+			body, _ := json.Marshal(map[string]string{"key": key, "value": value})
+			req, _ := http.NewRequestWithContext(ctx, "POST", gatewayURL+"/v1/memory?profile="+profile, bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return tool.Result{}, fmt.Errorf("agent/remember: %w", err)
+			}
+			resp.Body.Close()
+		}
+		return tool.Result{
+			ToolID: call.ToolID,
+			Output: fmt.Sprintf("remembered: %s = %s (profile: %s)", key, value, profile),
+		}, nil
+
+	case "agent-recall":
+		profile, _ := call.Arguments["profile"].(string)
+		key, _ := call.Arguments["key"].(string)
+		if profile == "" {
+			profile = t.PluginName
+		}
+		gatewayURL := os.Getenv("GATEWAY_URL")
+		if gatewayURL == "" {
+			return tool.Result{Output: "no gateway configured — memory not available"}, nil
+		}
+		url := gatewayURL + "/v1/memory?profile=" + profile
+		if key != "" {
+			url += "&key=" + key
+		}
+		resp, err := http.Get(url)
+		if err != nil {
+			return tool.Result{}, fmt.Errorf("agent/recall: %w", err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return tool.Result{
+			ToolID: call.ToolID,
+			Output: string(body),
+		}, nil
+
 	case "discover-agents":
 		agents, err := t.HostCaps.DiscoverAgents(ctx)
 		if err != nil {

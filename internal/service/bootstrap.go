@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	internalapproval "github.com/bitop-dev/agent/internal/approval"
 	internalhost "github.com/bitop-dev/agent/internal/host"
@@ -12,6 +13,7 @@ import (
 	"github.com/bitop-dev/agent/internal/plugin"
 	internalpolicy "github.com/bitop-dev/agent/internal/policy"
 	profileloader "github.com/bitop-dev/agent/internal/profile"
+	"github.com/bitop-dev/agent/internal/providers/anthropic"
 	"github.com/bitop-dev/agent/internal/providers/mock"
 	"github.com/bitop-dev/agent/internal/providers/openai"
 	"github.com/bitop-dev/agent/internal/registry"
@@ -72,6 +74,19 @@ func Bootstrap(cwd string) (App, error) {
 	}); err != nil {
 		return App{}, err
 	}
+	// Register Anthropic provider if configured.
+	if anthropicCfg := cfg.Providers["anthropic"]; anthropicCfg.APIKey != "" {
+		if err := providerRegistry.Register(anthropic.Provider{
+			APIKey:  anthropicCfg.APIKey,
+			BaseURL: anthropicCfg.BaseURL,
+		}); err != nil {
+			return App{}, err
+		}
+	} else if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+		if err := providerRegistry.Register(anthropic.Provider{APIKey: apiKey}); err != nil {
+			return App{}, err
+		}
+	}
 	pluginRegistry := registry.NewPluginRegistry()
 	promptRegistry := registry.NewPromptRegistry()
 	profileTemplateRegistry := registry.NewProfileTemplateRegistry()
@@ -99,6 +114,9 @@ func Bootstrap(cwd string) (App, error) {
 	}, Enable: func(name string) bool {
 		return cfg.IsPluginEnabled(name)
 	}}
+	// Auto-populate plugin configs from env vars and defaults before registration.
+	autoPopulatePluginConfigs(&cfg, pluginLoader)
+
 	mcpManager := internalmcp.NewManager()
 	if err := plugin.RegisterDiscovered(context.Background(), pluginLoader, plugin.Registries{
 		Plugins:          pluginRegistry,
@@ -129,6 +147,52 @@ func Bootstrap(cwd string) (App, error) {
 		Sessions:         store.Store{Path: filepath.Join(paths.SessionsDir, "sessions.db")},
 	}
 	return app, nil
+}
+
+// autoPopulatePluginConfigs fills missing plugin config values from:
+// 1. Property.EnvVar — explicit env var name from plugin.yaml
+// 2. Convention: AGENT_PLUGIN_<PLUGINNAME>_<KEY> (uppercase, hyphens→underscores)
+// 3. Property.Default — default value from plugin.yaml
+func autoPopulatePluginConfigs(cfg *config.Config, loader plugin.Loader) {
+	discovered, err := loader.Discover(context.Background())
+	if err != nil {
+		return
+	}
+	changed := false
+	for _, item := range discovered {
+		name := item.Manifest.Metadata.Name
+		pluginCfg := cfg.Plugins[name]
+		if pluginCfg.Config == nil {
+			pluginCfg.Config = make(map[string]any)
+		}
+		for key, prop := range item.Manifest.Spec.ConfigSchema.Properties {
+			if _, exists := pluginCfg.Config[key]; exists {
+				continue // already set
+			}
+			// Try explicit env var.
+			if prop.EnvVar != "" {
+				if val := os.Getenv(prop.EnvVar); val != "" {
+					pluginCfg.Config[key] = val
+					changed = true
+					continue
+				}
+			}
+			// Try convention: AGENT_PLUGIN_SENDEMAIL_BASEURL
+			envKey := "AGENT_PLUGIN_" + strings.ToUpper(strings.ReplaceAll(name, "-", "")) + "_" + strings.ToUpper(key)
+			if val := os.Getenv(envKey); val != "" {
+				pluginCfg.Config[key] = val
+				changed = true
+				continue
+			}
+			// Try default value.
+			if prop.Default != "" {
+				pluginCfg.Config[key] = prop.Default
+				changed = true
+			}
+		}
+		cfg.Plugins[name] = pluginCfg
+	}
+	_ = changed
 }
 
 func (a App) ResolveProvider(name string) (provider.Provider, error) {

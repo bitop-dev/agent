@@ -66,9 +66,11 @@ type Schema struct {
 }
 
 type Property struct {
-	Type   string   `yaml:"type,omitempty"`
-	Enum   []string `yaml:"enum,omitempty"`
-	Secret bool     `yaml:"secret,omitempty"`
+	Type    string   `yaml:"type,omitempty"`
+	Enum    []string `yaml:"enum,omitempty"`
+	Secret  bool     `yaml:"secret,omitempty"`
+	Default string   `yaml:"default,omitempty"` // default value if not set by user
+	EnvVar  string   `yaml:"envVar,omitempty"`  // env var to read from (e.g. SMTP_HOST)
 }
 
 type Contributions struct {

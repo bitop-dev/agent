@@ -85,32 +85,45 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 	const maxRetries = 3
 	const baseRetryDelayMs = 500
 	const maxExplorationToolCalls = 6
+
+	// Build model chain: primary + fallbacks.
+	models := []string{req.Profile.Spec.Provider.Model}
+	models = append(models, req.Profile.Spec.Provider.Fallback...)
+
 	for turn := 0; turn < maxTurns; turn++ {
 		if err := sink.Publish(ctx, events.Event{Type: events.TypeTurnStarted, Time: time.Now(), Message: fmt.Sprintf("turn %d started", turn+1)}); err != nil {
 			return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, err
 		}
 		var stream <-chan provider.StreamEvent
 		var err error
-		for attempt := 0; attempt < maxRetries; attempt++ {
-			stream, err = req.Provider.Stream(ctx, provider.CompletionRequest{
-				Model:    provider.ModelRef{Provider: req.Provider.Name(), Model: req.Profile.Spec.Provider.Model},
-				System:   req.SystemPrompt,
-				Messages: transcript,
-				Tools:    toolDefs,
-			})
-			if err == nil {
-				break
-			}
-			if attempt < maxRetries-1 {
-				jitter := time.Duration(rand.Intn(200)) * time.Millisecond
-				delay := time.Duration(math.Pow(2, float64(attempt)))*time.Duration(baseRetryDelayMs)*time.Millisecond + jitter
-				_ = sink.Publish(ctx, events.Event{Type: events.TypeError, Time: time.Now(), Message: fmt.Sprintf("provider error (attempt %d/%d): %s", attempt+1, maxRetries, err)})
-				select {
-				case <-ctx.Done():
-					return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, ctx.Err()
-				case <-time.After(delay):
+
+		// Try each model in the chain with retries.
+		for _, model := range models {
+			for attempt := 0; attempt < maxRetries; attempt++ {
+				stream, err = req.Provider.Stream(ctx, provider.CompletionRequest{
+					Model:    provider.ModelRef{Provider: req.Provider.Name(), Model: model},
+					System:   req.SystemPrompt,
+					Messages: transcript,
+					Tools:    toolDefs,
+				})
+				if err == nil {
+					break
+				}
+				if attempt < maxRetries-1 {
+					jitter := time.Duration(rand.Intn(200)) * time.Millisecond
+					delay := time.Duration(math.Pow(2, float64(attempt)))*time.Duration(baseRetryDelayMs)*time.Millisecond + jitter
+					_ = sink.Publish(ctx, events.Event{Type: events.TypeError, Time: time.Now(), Message: fmt.Sprintf("model %s attempt %d/%d: %s", model, attempt+1, maxRetries, err)})
+					select {
+					case <-ctx.Done():
+						return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, ctx.Err()
+					case <-time.After(delay):
+					}
 				}
 			}
+			if err == nil {
+				break // success with this model
+			}
+			_ = sink.Publish(ctx, events.Event{Type: events.TypeError, Time: time.Now(), Message: fmt.Sprintf("model %s exhausted retries, trying fallback", model)})
 		}
 		if err != nil {
 			return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, err

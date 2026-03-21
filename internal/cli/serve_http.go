@@ -159,7 +159,7 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 	log.Printf("  GET  /v1/agents   — list available agents")
 	log.Printf("  GET  /v1/health   — health check")
 
-	// Register with configured registry sources.
+	// Discover profiles for registration.
 	profiles, _ := app.Profiles.Discover(ctx)
 	var profileNames, capabilities []string
 	for _, p := range profiles {
@@ -167,6 +167,12 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 		capabilities = append(capabilities, p.Manifest.Metadata.Capabilities...)
 	}
 	workerURL := "http://" + resolveWorkerURL(addr)
+	gatewayURL := os.Getenv("GATEWAY_URL")
+
+	// Register with gateway (primary) and registry sources (fallback).
+	if gatewayURL != "" {
+		registerWithGateway(gatewayURL, workerURL, profileNames, dedup(capabilities))
+	}
 	registerWithRegistries(app, workerURL, profileNames, dedup(capabilities))
 
 	server := &http.Server{Addr: addr, Handler: mux}
@@ -178,9 +184,15 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 		for {
 			select {
 			case <-ctx.Done():
+				if gatewayURL != "" {
+					deregisterFromGateway(gatewayURL, workerURL)
+				}
 				deregisterFromRegistries(app, workerURL)
 				return
 			case <-ticker.C:
+				if gatewayURL != "" {
+					registerWithGateway(gatewayURL, workerURL, profileNames, dedup(capabilities))
+				}
 				registerWithRegistries(app, workerURL, profileNames, dedup(capabilities))
 			}
 		}
@@ -188,6 +200,9 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 
 	go func() {
 		<-ctx.Done()
+		if gatewayURL != "" {
+			deregisterFromGateway(gatewayURL, workerURL)
+		}
 		deregisterFromRegistries(app, workerURL)
 		server.Close()
 	}()
@@ -203,6 +218,35 @@ func resolveWorkerURL(addr string) string {
 		return "localhost" + addr
 	}
 	return addr
+}
+
+func registerWithGateway(gatewayURL, workerURL string, profiles, capabilities []string) {
+	payload := map[string]any{
+		"url":          workerURL,
+		"profiles":     profiles,
+		"capabilities": capabilities,
+	}
+	data, _ := json.Marshal(payload)
+	url := strings.TrimRight(gatewayURL, "/") + "/v1/workers"
+	resp, err := http.Post(url, "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		log.Printf("gateway registration failed: %v", err)
+		return
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		log.Printf("registered with gateway at %s", gatewayURL)
+	}
+}
+
+func deregisterFromGateway(gatewayURL, workerURL string) {
+	url := strings.TrimRight(gatewayURL, "/") + "/v1/workers?url=" + workerURL
+	req, _ := http.NewRequest(http.MethodDelete, url, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
 }
 
 func registerWithRegistries(app service.App, workerURL string, profiles, capabilities []string) {

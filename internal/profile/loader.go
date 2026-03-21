@@ -90,7 +90,7 @@ func (l Loader) Load(ctx context.Context, ref string) (pf.Manifest, string, erro
 	}
 	for _, profile := range profiles {
 		if profile.Reference.Name == ref {
-			return profile.Manifest, profile.Reference.Path, nil
+			return l.resolveInheritance(ctx, profile.Manifest, profile.Reference.Path)
 		}
 	}
 
@@ -98,11 +98,89 @@ func (l Loader) Load(ctx context.Context, ref string) (pf.Manifest, string, erro
 	if l.InstallRoot != "" && len(l.PluginSources) > 0 {
 		if manifest, path, err := l.installFromRegistry(ref); err == nil {
 			fmt.Fprintf(os.Stderr, "[on-demand] installed profile %q from registry\n", ref)
-			return manifest, path, nil
+			return l.resolveInheritance(ctx, manifest, path)
 		}
 	}
 
 	return pf.Manifest{}, "", fs.ErrNotExist
+}
+
+// resolveInheritance loads the parent profile and merges child fields on top.
+// Child fields override parent fields. Tools are merged (union). Instructions
+// are concatenated (parent first, child after).
+func (l Loader) resolveInheritance(ctx context.Context, child pf.Manifest, childPath string) (pf.Manifest, string, error) {
+	if child.Metadata.Extends == "" {
+		return child, childPath, nil
+	}
+	parent, _, err := l.Load(ctx, child.Metadata.Extends)
+	if err != nil {
+		return child, childPath, nil // can't find parent — use child as-is
+	}
+
+	merged := parent
+
+	// Metadata — child wins.
+	merged.Metadata.Name = child.Metadata.Name
+	merged.Metadata.Version = child.Metadata.Version
+	if child.Metadata.Description != "" {
+		merged.Metadata.Description = child.Metadata.Description
+	}
+	merged.Metadata.Extends = "" // don't chain further
+	if len(child.Metadata.Capabilities) > 0 {
+		merged.Metadata.Capabilities = child.Metadata.Capabilities
+	}
+	if child.Metadata.Accepts != "" {
+		merged.Metadata.Accepts = child.Metadata.Accepts
+	}
+	if child.Metadata.Returns != "" {
+		merged.Metadata.Returns = child.Metadata.Returns
+	}
+
+	// Provider — child wins if set.
+	if child.Spec.Provider.Default != "" {
+		merged.Spec.Provider = child.Spec.Provider
+	}
+
+	// Tools — union of parent and child.
+	toolSet := make(map[string]bool)
+	for _, t := range parent.Spec.Tools.Enabled {
+		toolSet[t] = true
+	}
+	for _, t := range child.Spec.Tools.Enabled {
+		toolSet[t] = true
+	}
+	var mergedTools []string
+	for t := range toolSet {
+		mergedTools = append(mergedTools, t)
+	}
+	merged.Spec.Tools.Enabled = mergedTools
+
+	// Instructions — concatenate (parent first, child after).
+	if len(child.Spec.Instructions.System) > 0 {
+		merged.Spec.Instructions.System = append(parent.Spec.Instructions.System, child.Spec.Instructions.System...)
+	}
+
+	// Approval — child wins if set.
+	if child.Spec.Approval.Mode != "" {
+		merged.Spec.Approval = child.Spec.Approval
+	}
+
+	// Workspace — child wins if set.
+	if child.Spec.Workspace.WriteScope != "" {
+		merged.Spec.Workspace = child.Spec.Workspace
+	}
+
+	// Session — child wins if set.
+	if child.Spec.Session.Persistence != "" {
+		merged.Spec.Session = child.Spec.Session
+	}
+
+	// Policy — child wins if has overlays.
+	if len(child.Spec.Policy.Overlays) > 0 {
+		merged.Spec.Policy = child.Spec.Policy
+	}
+
+	return merged, childPath, nil
 }
 
 // installFromRegistry downloads a profile package from a configured registry source.
