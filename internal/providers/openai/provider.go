@@ -390,6 +390,28 @@ func toResponsesInput(messages []provider.Message) []responsesInputItem {
 			})
 			continue
 		}
+		// Assistant messages with tool calls → function_call items
+		if message.Role == "assistant" && len(message.ToolCalls) > 0 {
+			for _, tc := range message.ToolCalls {
+				items = append(items, responsesInputItem{
+					Type:      "function_call",
+					CallID:    tc.ID,
+					Name:      sanitizeToolName(tc.ToolID),
+					Arguments: mustJSON(tc.Arguments),
+				})
+			}
+			// Also include assistant text if present
+			if message.Content != "" {
+				items = append(items, responsesInputItem{
+					Role: "assistant",
+					Content: []responsesInputContent{{
+						Type: "output_text",
+						Text: message.Content,
+					}},
+				})
+			}
+			continue
+		}
 		items = append(items, responsesInputItem{
 			Role: mapRole(message.Role),
 			Content: []responsesInputContent{{
@@ -543,11 +565,13 @@ type responsesRequest struct {
 }
 
 type responsesInputItem struct {
-	Type    string                  `json:"type,omitempty"`
-	Role    string                  `json:"role,omitempty"`
-	Content []responsesInputContent `json:"content,omitempty"`
-	CallID  string                  `json:"call_id,omitempty"`
-	Output  string                  `json:"output,omitempty"`
+	Type      string                  `json:"type,omitempty"`
+	Role      string                  `json:"role,omitempty"`
+	Content   []responsesInputContent `json:"content,omitempty"`
+	CallID    string                  `json:"call_id,omitempty"`
+	Name      string                  `json:"name,omitempty"`
+	Arguments string                  `json:"arguments,omitempty"`
+	Output    string                  `json:"output,omitempty"`
 }
 
 type responsesInputContent struct {
