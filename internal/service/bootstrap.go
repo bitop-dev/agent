@@ -136,14 +136,98 @@ func (a App) ResolveProvider(name string) (provider.Provider, error) {
 
 func (a App) ResolveTools(enabled []string) ([]tool.Tool, error) {
 	tools := make([]tool.Tool, 0, len(enabled))
+	var missing []string
 	for _, id := range enabled {
 		toolImpl, ok := a.Tools.Get(id)
 		if !ok {
-			return nil, fmt.Errorf("tool %q is not registered", id)
+			missing = append(missing, id)
+			continue
+		}
+		tools = append(tools, toolImpl)
+	}
+	if len(missing) == 0 {
+		return tools, nil
+	}
+
+	// Try on-demand plugin install from configured registry sources.
+	installed := a.installMissingPlugins(missing)
+	if !installed {
+		return nil, fmt.Errorf("tool(s) not registered and could not be installed: %v", missing)
+	}
+
+	// Retry resolution after installing new plugins.
+	tools = tools[:0]
+	for _, id := range enabled {
+		toolImpl, ok := a.Tools.Get(id)
+		if !ok {
+			return nil, fmt.Errorf("tool %q is not registered (even after on-demand install)", id)
 		}
 		tools = append(tools, toolImpl)
 	}
 	return tools, nil
+}
+
+// installMissingPlugins searches the registry for plugins that might provide
+// the missing tools, installs them, and re-registers all discovered plugins.
+func (a App) installMissingPlugins(missingTools []string) bool {
+	if len(a.Config.PluginSources) == 0 {
+		return false
+	}
+
+	// Search the registry for all available plugins.
+	matches, err := plugin.SearchSources("", a.Config.PluginSources)
+	if err != nil || len(matches) == 0 {
+		return false
+	}
+
+	// Install any plugin that isn't already installed.
+	installedAny := false
+	for _, match := range matches {
+		name := match.Manifest.Metadata.Name
+		destDir := filepath.Join(a.Paths.UserPluginsDir, name)
+		if _, err := os.Stat(destDir); err == nil {
+			continue // already installed
+		}
+		result, err := plugin.Install(name, a.Config.PluginSources, a.Paths.UserPluginsDir,
+			plugin.InstallOptions{})
+		if err != nil {
+			continue
+		}
+		// Enable the plugin in config.
+		cfg, err := config.Load(a.Paths)
+		if err == nil {
+			cfg.SetPluginEnabled(name, true)
+			cfg.SetPluginInstallRecord(name, result.Version, result.Source)
+			config.Save(a.Paths, cfg)
+		}
+		installedAny = true
+		fmt.Fprintf(os.Stderr, "[on-demand] installed plugin %s@%s from %s\n", name, result.Version, result.Source)
+	}
+
+	if !installedAny {
+		return false
+	}
+
+	// Re-discover and register all plugins (including newly installed ones).
+	cfg, _ := config.Load(a.Paths)
+	pluginLoader := plugin.Loader{
+		Roots: []string{a.Paths.LocalPluginsDir, a.Paths.UserPluginsDir},
+		Enable: func(name string) bool { return cfg.IsPluginEnabled(name) },
+	}
+	err = plugin.RegisterDiscovered(context.Background(), pluginLoader, plugin.Registries{
+		Plugins:          a.PluginManifests,
+		Tools:            a.Tools,
+		Prompts:          a.Prompts,
+		ProfileTemplates: a.ProfileTemplates,
+		Policies:         a.Policies,
+		PluginConfigs:    cfg.Plugins,
+		HostCapabilities: a.HostCaps,
+		MCPManager:       a.MCPManager,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[on-demand] re-register warning: %v\n", err)
+	}
+	return true
 }
 
 func (a App) BuildPolicy(workspaceRef workspace.Workspace, manifest profile.Manifest, profilePath string) policy.Engine {
