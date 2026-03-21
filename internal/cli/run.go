@@ -175,14 +175,15 @@ func runTaskForServe(ctx context.Context, app service.App, profileRef string, ar
 	}
 	workspaceRef, _ := workspace.Resolve(app.Paths.CWD)
 	result, err := executeServeRun(ctx, app, runInput{
-		Prompt:       task,
-		Manifest:     m,
-		ProfilePath:  path,
-		ProviderImpl: providerImpl,
-		Tools:        tools,
-		Workspace:    workspaceRef,
-		NoSession:    true,
-		CWD:          app.Paths.CWD,
+		Prompt:        task,
+		Manifest:      m,
+		ProfilePath:   path,
+		ProviderImpl:  providerImpl,
+		Tools:         tools,
+		Workspace:     workspaceRef,
+		NoSession:     true,
+		CWD:           app.Paths.CWD,
+		ModelOverride: config.ResolveModel(app.Config, m.Spec.Provider.Default, m.Metadata.Name, m.Spec.Provider.Model, ""),
 	})
 	if err != nil {
 		return serveResult{}, err
@@ -198,6 +199,7 @@ func runTaskForServe(ctx context.Context, app service.App, profileRef string, ar
 func runCommand(ctx context.Context, app service.App, args []string) error {
 	profileRef := app.Config.DefaultProfile
 	approvalMode := ""
+	modelFlag := ""
 	noSession := false
 	var promptParts []string
 	for i := 0; i < len(args); i++ {
@@ -213,6 +215,12 @@ func runCommand(ctx context.Context, app service.App, args []string) error {
 				return errors.New("--approval requires a value")
 			}
 			approvalMode = args[i+1]
+			i++
+		case "--model":
+			if i+1 >= len(args) {
+				return errors.New("--model requires a value")
+			}
+			modelFlag = args[i+1]
 			i++
 		case "--no-session":
 			noSession = true
@@ -247,15 +255,16 @@ func runCommand(ctx context.Context, app service.App, args []string) error {
 		return err
 	}
 	result, err := executeRun(ctx, app, runInput{
-		Prompt:       prompt,
-		Manifest:     manifest,
-		ProfilePath:  path,
-		ProviderImpl: providerImpl,
-		Tools:        tools,
-		Workspace:    workspaceRef,
-		ApprovalMode: approvalMode,
-		NoSession:    noSession,
-		CWD:          app.Paths.CWD,
+		Prompt:        prompt,
+		Manifest:      manifest,
+		ProfilePath:   path,
+		ProviderImpl:  providerImpl,
+		Tools:         tools,
+		Workspace:     workspaceRef,
+		ApprovalMode:  approvalMode,
+		NoSession:     noSession,
+		CWD:           app.Paths.CWD,
+		ModelOverride: config.ResolveModel(app.Config, manifest.Spec.Provider.Default, manifest.Metadata.Name, manifest.Spec.Provider.Model, modelFlag),
 	})
 	if err != nil {
 		return err
@@ -266,6 +275,7 @@ func runCommand(ctx context.Context, app service.App, args []string) error {
 func chatCommand(ctx context.Context, app service.App, args []string) error {
 	profileRef := app.Config.DefaultProfile
 	approvalMode := ""
+	modelFlag := ""
 	noSession := false
 	sessionID := ""
 	for i := 0; i < len(args); i++ {
@@ -282,6 +292,12 @@ func chatCommand(ctx context.Context, app service.App, args []string) error {
 			}
 			approvalMode = args[i+1]
 			i++
+		case "--model":
+			if i+1 >= len(args) {
+				return errors.New("--model requires a value")
+			}
+			modelFlag = args[i+1]
+			i++
 		case "--session":
 			if i+1 >= len(args) {
 				return errors.New("--session requires a value")
@@ -294,6 +310,8 @@ func chatCommand(ctx context.Context, app service.App, args []string) error {
 			return fmt.Errorf("unknown chat argument %q", args[i])
 		}
 	}
+	// Store model flag for use in chat loop
+	_ = modelFlag // passed via initializeChatState below
 
 	state, err := initializeChatState(ctx, app, profileRef, sessionID, approvalMode, noSession)
 	if err != nil {
@@ -331,17 +349,18 @@ func chatCommand(ctx context.Context, app service.App, args []string) error {
 			continue
 		}
 		result, err := executeRun(ctx, app, runInput{
-			Prompt:       line,
-			Manifest:     state.Manifest,
-			ProfilePath:  state.ProfilePath,
-			ProviderImpl: state.ProviderImpl,
-			Tools:        state.Tools,
-			Workspace:    state.Workspace,
-			ApprovalMode: state.ApprovalMode,
-			SessionID:    state.SessionID,
-			Transcript:   state.Transcript,
-			NoSession:    state.NoSession,
-			CWD:          state.CWD,
+			Prompt:        line,
+			Manifest:      state.Manifest,
+			ProfilePath:   state.ProfilePath,
+			ProviderImpl:  state.ProviderImpl,
+			Tools:         state.Tools,
+			Workspace:     state.Workspace,
+			ApprovalMode:  state.ApprovalMode,
+			SessionID:     state.SessionID,
+			Transcript:    state.Transcript,
+			NoSession:     state.NoSession,
+			CWD:           state.CWD,
+			ModelOverride: config.ResolveModel(app.Config, state.Manifest.Spec.Provider.Default, state.Manifest.Metadata.Name, state.Manifest.Spec.Provider.Model, modelFlag),
 		})
 		if err != nil {
 			return err
@@ -1507,17 +1526,18 @@ func loadSystemInstructions(profilePath string, refs []string, prompts *registry
 }
 
 type runInput struct {
-	Prompt       string
-	Manifest     profile.Manifest
-	ProfilePath  string
-	ProviderImpl provider.Provider
-	Tools        []tool.Tool
-	Workspace    workspace.Workspace
-	ApprovalMode string
-	SessionID    string
-	Transcript   []provider.Message
-	NoSession    bool
-	CWD          string
+	Prompt        string
+	Manifest      profile.Manifest
+	ProfilePath   string
+	ProviderImpl  provider.Provider
+	Tools         []tool.Tool
+	Workspace     workspace.Workspace
+	ApprovalMode  string
+	SessionID     string
+	Transcript    []provider.Message
+	NoSession     bool
+	CWD           string
+	ModelOverride string
 }
 
 type chatState struct {
@@ -1548,16 +1568,17 @@ func executeServeRun(ctx context.Context, app service.App, input runInput) (pkgr
 		app.HostCaps.Events = eventSink
 	}
 	runReq := pkgruntime.RunRequest{
-		Prompt:       input.Prompt,
-		SystemPrompt: loadSystemInstructions(input.ProfilePath, input.Manifest.Spec.Instructions.System, app.Prompts),
-		Profile:      input.Manifest,
-		Provider:     input.ProviderImpl,
-		Tools:        input.Tools,
-		Policy:       app.BuildPolicy(input.Workspace, input.Manifest, input.ProfilePath),
-		Approvals:    app.BuildApprovalResolver(firstNonEmpty(input.ApprovalMode, input.Manifest.Spec.Approval.Mode)),
-		Events:       eventSink,
-		Execution:    pkgruntime.ExecutionContext{CWD: input.CWD, SessionID: input.SessionID, ProfileRef: input.ProfilePath, Workspace: input.Workspace},
-		Transcript:   input.Transcript,
+		Prompt:        input.Prompt,
+		SystemPrompt:  loadSystemInstructions(input.ProfilePath, input.Manifest.Spec.Instructions.System, app.Prompts),
+		Profile:       input.Manifest,
+		Provider:      input.ProviderImpl,
+		Tools:         input.Tools,
+		Policy:        app.BuildPolicy(input.Workspace, input.Manifest, input.ProfilePath),
+		Approvals:     app.BuildApprovalResolver(firstNonEmpty(input.ApprovalMode, input.Manifest.Spec.Approval.Mode)),
+		Events:        eventSink,
+		Execution:     pkgruntime.ExecutionContext{CWD: input.CWD, SessionID: input.SessionID, ProfileRef: input.ProfilePath, Workspace: input.Workspace},
+		Transcript:    input.Transcript,
+		ModelOverride: input.ModelOverride,
 	}
 	return app.Runner.Run(ctx, runReq)
 }
@@ -1569,16 +1590,17 @@ func executeRun(ctx context.Context, app service.App, input runInput) (pkgruntim
 		app.HostCaps.Events = eventSink
 	}
 	runReq := pkgruntime.RunRequest{
-		Prompt:       input.Prompt,
-		SystemPrompt: loadSystemInstructions(input.ProfilePath, input.Manifest.Spec.Instructions.System, app.Prompts),
-		Profile:      input.Manifest,
-		Provider:     input.ProviderImpl,
-		Tools:        input.Tools,
-		Policy:       app.BuildPolicy(input.Workspace, input.Manifest, input.ProfilePath),
-		Approvals:    app.BuildApprovalResolver(firstNonEmpty(input.ApprovalMode, input.Manifest.Spec.Approval.Mode)),
-		Events:       eventSink,
-		Execution:    pkgruntime.ExecutionContext{CWD: input.CWD, SessionID: input.SessionID, ProfileRef: input.ProfilePath, Workspace: input.Workspace},
-		Transcript:   input.Transcript,
+		Prompt:        input.Prompt,
+		SystemPrompt:  loadSystemInstructions(input.ProfilePath, input.Manifest.Spec.Instructions.System, app.Prompts),
+		Profile:       input.Manifest,
+		Provider:      input.ProviderImpl,
+		Tools:         input.Tools,
+		Policy:        app.BuildPolicy(input.Workspace, input.Manifest, input.ProfilePath),
+		Approvals:     app.BuildApprovalResolver(firstNonEmpty(input.ApprovalMode, input.Manifest.Spec.Approval.Mode)),
+		Events:        eventSink,
+		Execution:     pkgruntime.ExecutionContext{CWD: input.CWD, SessionID: input.SessionID, ProfileRef: input.ProfilePath, Workspace: input.Workspace},
+		Transcript:    input.Transcript,
+		ModelOverride: input.ModelOverride,
 	}
 	if !input.NoSession {
 		runReq.Sessions = app.Sessions

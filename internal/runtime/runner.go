@@ -89,7 +89,15 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 	const maxExplorationToolCalls = 6
 
 	// Build model chain: primary + fallbacks.
-	models := []string{req.Profile.Spec.Provider.Model}
+	// ModelOverride (from config/CLI/env) takes priority over profile's model.
+	primaryModel := req.Profile.Spec.Provider.Model
+	if req.ModelOverride != "" {
+		primaryModel = req.ModelOverride
+	}
+	if primaryModel == "" {
+		primaryModel = "gpt-4o" // ultimate fallback
+	}
+	models := []string{primaryModel}
 	models = append(models, req.Profile.Spec.Provider.Fallback...)
 
 	for turn := 0; turn < maxTurns; turn++ {

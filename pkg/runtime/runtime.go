@@ -25,17 +25,18 @@ type ExecutionContext struct {
 }
 
 type RunRequest struct {
-	Prompt       string
-	SystemPrompt string
-	Profile      profile.Manifest
-	Provider     provider.Provider
-	Tools        []tool.Tool
-	Policy       policy.Engine
-	Approvals    approval.Resolver
-	Sessions     session.Store
-	Events       events.Sink
-	Execution    ExecutionContext
-	Transcript   []provider.Message
+	Prompt        string
+	SystemPrompt  string
+	Profile       profile.Manifest
+	Provider      provider.Provider
+	Tools         []tool.Tool
+	Policy        policy.Engine
+	Approvals     approval.Resolver
+	Sessions      session.Store
+	Events        events.Sink
+	Execution     ExecutionContext
+	Transcript    []provider.Message
+	ModelOverride string // If set, overrides profile's model (from config/CLI/env)
 }
 
 type RunResult struct {

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bitop-dev/agent/pkg/config"
 	internalpolicy "github.com/bitop-dev/agent/internal/policy"
 	profileloader "github.com/bitop-dev/agent/internal/profile"
 	"github.com/bitop-dev/agent/internal/registry"
@@ -31,7 +32,8 @@ type RuntimeCapabilities struct {
 	Providers    *registry.ProviderRegistry
 	Prompts      *registry.PromptRegistry
 	Events       events.Sink // parent event sink — sub-agent events are forwarded here with a prefix
-	GatewayURL   string      // if set, parallel sub-agents are dispatched through the gateway for true distribution
+	Config       config.Config
+	GatewayURL   string // if set, parallel sub-agents are dispatched through the gateway for true distribution
 	DefaultCWD   string
 	MaxDepth     int
 	currentDepth int
@@ -195,14 +197,15 @@ func (c *RuntimeCapabilities) SpawnSubRun(ctx context.Context, req pkghost.SubRu
 	}
 
 	runReq := pkgruntime.RunRequest{
-		Prompt:       prompt,
-		SystemPrompt: loadSystemPrompt(profilePath, manifest.Spec.Instructions.System, c.Prompts),
-		Profile:      manifest,
-		Provider:     providerImpl,
-		Tools:        toolsForRun,
-		Policy:       policyEngine,
-		Approvals:    approvalResolver,
-		Events:       eventSink,
+		Prompt:        prompt,
+		SystemPrompt:  loadSystemPrompt(profilePath, manifest.Spec.Instructions.System, c.Prompts),
+		Profile:       manifest,
+		Provider:      providerImpl,
+		Tools:         toolsForRun,
+		Policy:        policyEngine,
+		Approvals:     approvalResolver,
+		Events:        eventSink,
+		ModelOverride: config.ResolveModel(c.Config, manifest.Spec.Provider.Default, manifest.Metadata.Name, manifest.Spec.Provider.Model, ""),
 		Execution: pkgruntime.ExecutionContext{
 			CWD:        c.DefaultCWD,
 			ProfileRef: profilePath,

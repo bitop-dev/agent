@@ -39,9 +39,11 @@ type PluginSource struct {
 }
 
 type ProviderConfig struct {
-	BaseURL string `yaml:"baseURL"`
-	APIKey  string `yaml:"apiKey"`
-	APIMode string `yaml:"apiMode"`
+	BaseURL string            `yaml:"baseURL"`
+	APIKey  string            `yaml:"apiKey"`
+	APIMode string            `yaml:"apiMode"`
+	Model   string            `yaml:"model"`            // global default model
+	Models  map[string]string `yaml:"models,omitempty"` // per-profile model overrides
 }
 
 type PluginConfig struct {
@@ -126,9 +128,53 @@ func applyEnvOverrides(cfg *Config) {
 	if value := os.Getenv("OPENAI_API_MODE"); value != "" {
 		openAI.APIMode = value
 	}
-	if openAI != (ProviderConfig{}) {
+	if value := os.Getenv("OPENAI_MODEL"); value != "" {
+		openAI.Model = value
+	}
+	if openAI.BaseURL != "" || openAI.APIKey != "" || openAI.APIMode != "" || openAI.Model != "" {
 		cfg.Providers["openai"] = openAI
 	}
+}
+
+// ResolveModel determines the model to use with the following priority:
+//  1. cliModel — explicit --model flag (highest priority)
+//  2. AGENT_MODEL env var
+//  3. Per-profile override in config: providers.<name>.models.<profile>
+//  4. Global default in config: providers.<name>.model
+//  5. Profile's own model: spec.provider.model
+//  6. Hardcoded fallback: gpt-4o
+func ResolveModel(cfg Config, providerName, profileName, profileModel, cliModel string) string {
+	// 1. CLI flag
+	if cliModel != "" {
+		return cliModel
+	}
+
+	// 2. AGENT_MODEL env var
+	if envModel := os.Getenv("AGENT_MODEL"); envModel != "" {
+		return envModel
+	}
+
+	provCfg := cfg.Providers[providerName]
+
+	// 3. Per-profile override
+	if provCfg.Models != nil {
+		if m, ok := provCfg.Models[profileName]; ok && m != "" {
+			return m
+		}
+	}
+
+	// 4. Global default from config
+	if provCfg.Model != "" {
+		return provCfg.Model
+	}
+
+	// 5. Profile's recommendation
+	if profileModel != "" {
+		return profileModel
+	}
+
+	// 6. Hardcoded fallback
+	return "gpt-4o"
 }
 
 func (c Config) IsPluginEnabled(name string) bool {
