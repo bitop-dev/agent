@@ -1,33 +1,22 @@
 # Roadmap
 
-## Current state (v0.4.5)
+## Current state (v0.4.8)
 
-Distributed agent platform deployed in k8s with 7 pods. All core features
-implemented, tested, and running in production.
+Distributed agent platform deployed in k8s. All core features complete.
+Marketplace live with 9 plugins and 6 profiles.
 
 ### Completed
-
-Everything in the platform is built, wired, and tested:
-
 - Core framework, plugins, profiles, tools, sessions, policy, approvals
 - On-demand plugin + profile install from registry
-- HTTP workers (blank, self-bootstrapping, pod IP registration)
-- MCP server mode for external clients
-- Agent discovery, structured handoff, pipelines, checkpoints
-- Sequential + parallel sub-agents + gateway-distributed parallel
-- Gateway: routing, auth, webhooks, scheduling, retries, dead worker eviction
-- NATS event bus, SSE stream, web dashboard
-- Agent memory (agent/remember, agent/recall, PostgreSQL)
-- Cost tracking (models.dev pricing, token usage pipeline)
-- Model fallback chain (stream error detection, auto-advance)
-- Plugin config from environment (EnvVar, Default, convention)
-- Profile inheritance (extends with merge)
-- Anthropic native provider
-- Reactive triggers (service-mode profiles → gateway webhooks)
+- HTTP workers, MCP server, sub-agent orchestration
+- Gateway: routing, auth, webhooks, scheduling, retries, costs, memory, dashboard
+- OpenAI Responses API with multi-turn tool calls
+- Configurable model resolution (config/CLI/env/per-profile)
+- Marketplace with search, download counts, READMEs, browsable UI
+- 9 plugins (Go binaries), 6 model-optional profiles
 - CI/CD, Docker images, k8s deployment
 
 ### Remaining
-
-1. **Enhanced dashboard** — task detail views, submit from UI, SSE real-time, cost charts
-2. **Marketplace** — public registry, community plugins/profiles
-3. **Note:** Cost tracking shows $0 for self-hosted models (UFL proxy doesn't return usage tokens) — revisit when using direct API keys
+1. **Multi-user support** — accounts, per-user config, team scoping
+2. **Marketplace v2** — publisher accounts, ratings, trending
+3. **Production hardening** — multi-arch builds, rate limiting, package signing
