@@ -1,206 +1,216 @@
 # Roadmap
 
-## Current state (v0.3.x)
+## Current state (v0.3.6)
 
-The framework is a working distributed agent system. Blank workers in k8s
-pull profiles and plugins from a registry on demand, execute tasks using
-LLM-driven tool chains, and return results. Multi-agent orchestration
-(discovery, delegation, pipelines) works end to end.
+The platform is a working distributed agent system deployed in k8s with 6 services:
+gateway, workers, registry, PostgreSQL, NATS, and a web dashboard.
 
-What's deployed:
-- Registry server with plugin + profile publishing
-- Dynamic HTTP workers with on-demand install
-- MCP server mode for external clients (opencode, Claude Desktop)
-- Agent discovery across local profiles and registry
-- Sub-agent orchestration (sequential, parallel, pipeline)
-- Session compaction, message bus, worker registration
+### What's deployed and working
 
----
-
-## Near term — operational improvements
-
-### Multi-arch plugin builds
-Plugins with compiled binaries (ddg-research, grafana-alerts, slack) fail
-when the binary was built for a different OS/arch than the worker. Need:
-- CI workflow in agent-plugins that builds linux/amd64 + darwin/arm64
-- Plugin tarball includes both, worker selects the right one at install
-- Or: plugins declare a `build` command and workers compile on install
-
-### Provider resilience
-LLM API calls from k8s are slower and less reliable than local. Need:
-- Configurable retry with exponential backoff (partially exists)
-- Request timeout per-model (some models are slower)
-- Model fallback chain — if primary model times out, try a secondary
-- Provider health check at startup
-
-### Plugin config from environment
-Plugins like send-email need config (SMTP host, credentials) that currently
-requires `plugins config set` commands. In k8s, config should come from:
-- Environment variables mapped via envMapping (exists but not used for all plugins)
-- Secrets mounted as config
-- Default config values in plugin.yaml so plugins work with minimal setup
-
-### Worker observability
-No visibility into what workers are doing without `kubectl logs`. Need:
-- `GET /v1/status` — current task, profile, duration, tool calls in progress
-- `GET /v1/tasks/history` — last N completed tasks with results and timing
-- Structured JSON logs with task IDs for correlation
-- Prometheus metrics: tasks completed, duration histogram, errors, cache hits
-
-### Task history and audit
-Task results disappear after the HTTP response. Need:
-- Workers store completed tasks in a local SQLite or send to a central store
-- `GET /v1/tasks` — list recent tasks
-- `GET /v1/tasks/{id}` — get full result, tool call trace, timing
-- Retention policy (keep last 100 tasks or last 7 days)
+| Feature | Status |
+|---|---|
+| Core agent framework (runtime, CLI, tools) | ✅ |
+| Plugin system (install, upgrade, publish, dependencies) | ✅ |
+| Profile system (discovery metadata, MCP server, registry) | ✅ |
+| On-demand plugin + profile install from registry | ✅ |
+| HTTP worker mode (dynamic profile loading) | ✅ |
+| MCP server mode (opencode, Claude Desktop) | ✅ |
+| Agent discovery (local + registry) | ✅ |
+| Structured handoff (context parameter) | ✅ |
+| Agent pipelines (agent/pipeline with {{var}} routing) | ✅ |
+| Pipeline checkpoints | ✅ |
+| Sequential sub-agents (agent/spawn) | ✅ |
+| Parallel sub-agents (agent/spawn-parallel) | ✅ |
+| Gateway-distributed parallel (POST /v1/tasks/parallel) | ✅ |
+| Gateway task routing (capability-based, load-aware) | ✅ |
+| Gateway retries on transient failures | ✅ |
+| API key auth with scopes | ✅ |
+| Webhooks with template expansion | ✅ |
+| Cron scheduling | ✅ |
+| Task history in PostgreSQL | ✅ |
+| NATS event bus | ✅ |
+| SSE event stream | ✅ |
+| Web dashboard (embedded) | ✅ |
+| Worker auto-registration with gateway | ✅ |
+| Session compaction (pi-mono style) | ✅ |
+| Tool name sanitization (Bedrock/Azure) | ✅ |
+| Sub-agent progress visibility | ✅ |
+| CI/CD with GitHub Actions | ✅ |
+| Docker images (multi-arch) | ✅ |
+| k8s deployment (6 services) | ✅ |
 
 ---
 
-## Medium term — workflow features
+## What to work on next (priority order)
 
-### Scheduled tasks (cron)
-Run agents on a schedule without external triggers:
-```yaml
-# schedule.yaml
-schedules:
-  - name: daily-ops-report
-    cron: "0 8 * * *"
-    profile: grafana-alert-summary
-    task: "Generate daily ops report for team ict-aipe. Send to nick@bitop.dev"
-    context:
-      team: ict-aipe
-```
-Workers pick up scheduled tasks from the registry or a shared schedule store.
+### 1. Multi-arch plugin builds (CI)
+**Status:** Manual cross-compile before publishing. No automation.
 
-### Webhook triggers
-External systems trigger agent tasks:
-- `POST /v1/webhook/slack` — Slack message → agent task
-- `POST /v1/webhook/github` — GitHub event → agent task
-- `POST /v1/webhook/grafana` — Grafana alert → agent task
-- `POST /v1/webhook/generic` — any JSON payload → agent task with template
+Plugins with Go binaries (ddg-research, grafana-alerts, slack) must be
+compiled for linux/amd64 before publishing to the registry for k8s workers.
+Currently done by hand.
 
-Example: Grafana fires an alert → webhook hits worker → worker runs
-grafana-researcher to investigate → emails the team.
+**What to build:**
+- GitHub Actions workflow in agent-plugins that cross-compiles on push/tag
+- Plugin tarball includes binaries for linux/amd64 + darwin/arm64
+- Worker selects the correct binary at install time based on GOOS/GOARCH
+- Or: plugins declare a `build` step and workers compile from source
 
-### Profile inheritance and composition
-Profiles should be composable:
-```yaml
-# base-researcher.yaml — shared research behavior
-metadata:
-  name: base-researcher
-spec:
-  tools:
-    enabled: [ddg/search, ddg/fetch]
-
-# security-researcher.yaml — extends base
-metadata:
-  name: security-researcher
-  extends: base-researcher
-spec:
-  instructions:
-    system:
-      - base-researcher/system    # inherit base prompt
-      - ./prompts/security.md     # add security focus
-  tools:
-    enabled:
-      - ddg/search     # inherited
-      - ddg/fetch      # inherited
-      - cve/search     # additional
-```
-
-### Agent memory / persistent knowledge
-Agents forget everything between tasks. For long-term projects:
-- Per-profile knowledge store (key-value or vector)
-- `agent/remember` tool — store a fact for future tasks
-- `agent/recall` tool — retrieve relevant facts from memory
-- Memory shared across all tasks using the same profile
-
-### Cost tracking
-Track LLM token usage per task, profile, and model:
-- Token count per request/response
-- Cost estimate based on model pricing
-- Budget limits per profile or per worker
-- `GET /v1/costs` — usage dashboard data
+**Why first:** Every k8s deployment hits this. Without it, publishing
+a plugin from macOS produces a broken binary in k8s.
 
 ---
 
-## Long term — platform features
+### 2. Agent memory / persistent knowledge
+**Status:** PostgreSQL table exists (`agent_memory`). No tools or API.
 
-### Web dashboard
-Browser UI for managing the agent system:
-- Worker status (health, current task, uptime)
-- Task history with search and filtering
-- Agent/profile browser with live testing
-- Plugin management (install, enable, configure)
-- Session viewer for debugging agent behavior
-- Cost and usage charts
+Agents forget everything between tasks. For recurring workflows (daily ops
+reports, weekly research), agents should remember previous findings.
 
-### Multi-provider support
-Different agents use different LLM providers:
-```yaml
-# Fast cheap researcher
-spec:
-  provider:
-    default: openai
-    model: gpt-4o-mini
+**What to build:**
+- `agent/remember` host tool — store a key-value fact for this profile
+- `agent/recall` host tool — retrieve facts stored by previous tasks
+- Gateway API: `GET/POST /v1/memory?profile=researcher`
+- Memory scoped per-profile (researcher remembers different things than orchestrator)
+- Optional TTL for expiring facts
 
-# Precise expensive analyst
-spec:
-  provider:
-    default: anthropic
-    model: claude-4-sonnet
-```
-Requires native provider implementations beyond the current
-OpenAI-compatible proxy.
+**Why second:** Enables the daily ops report to say "compared to yesterday's
+report..." and the research agent to avoid re-fetching the same articles.
 
-### Agent marketplace
-Community-contributed plugins and profiles:
+---
+
+### 3. Cost tracking
+**Status:** Not started.
+
+No visibility into LLM token usage or cost per task.
+
+**What to build:**
+- Count input/output tokens per LLM API call in the provider
+- Store token counts per task in PostgreSQL
+- Calculate estimated cost based on model pricing table
+- Gateway API: `GET /v1/costs?profile=&since=`
+- Budget limits per profile (soft warning) or per worker (hard cap)
+- Dashboard: cost chart by profile and model
+
+**Why third:** Running 5 workers with nemotron-120b costs real money.
+Need visibility before scaling further.
+
+---
+
+### 4. Model fallback chain
+**Status:** Gateway retries on transient errors. No model-level fallback.
+
+When a model times out or returns garbage (nemotron's `<|channel|>` garbling),
+the agent should try a different model instead of failing.
+
+**What to build:**
+- Profile spec: `provider.fallback: [gpt-oss-120b, gpt-4o-mini]`
+- Runtime: if primary model fails, retry with fallback model
+- Separate from gateway retries (which pick a different worker)
+- Log which model was used in the task result
+
+**Why fourth:** The nemotron garbling issue and LLM timeouts are the
+most common failure mode in production.
+
+---
+
+### 5. Plugin config from environment
+**Status:** `envMapping` exists. Not all plugins use it. No defaults.
+
+Plugins like send-email need SMTP config that should come from k8s
+secrets, not manual `plugins config set` commands.
+
+**What to build:**
+- Default config values in plugin.yaml configSchema
+- Auto-populate config from matching environment variables
+- `AGENT_PLUGIN_<NAME>_<KEY>` convention for env-based config
+- On-demand install sets defaults so plugins work with minimal setup
+
+**Why fifth:** Reduces friction for k8s deployments where every plugin
+needs manual config after install.
+
+---
+
+### 6. Profile inheritance
+**Status:** Not started.
+
+Profiles can't extend other profiles. Every new agent type copies
+the full YAML instead of inheriting common settings.
+
+**What to build:**
+- `extends: base-researcher` field in profile metadata
+- Merged tools, instructions, policies from parent
+- Child overrides parent fields
+- Registry resolves parent profiles on demand
+
+---
+
+### 7. Worker auto-registration with gateway
+**Status:** Workers register with registry. Gateway registration is manual.
+
+Workers should auto-register with the gateway on startup, not require
+manual curl commands after deployment.
+
+**What to build:**
+- Worker reads `GATEWAY_URL` and registers at startup
+- Heartbeat to gateway every 5 minutes (already heartbeats to registry)
+- Deregister on shutdown
+- Remove manual registration step from k8s deployment
+
+---
+
+### 8. Multi-provider support
+**Status:** Only OpenAI-compatible API via proxy.
+
+**What to build:**
+- Native Anthropic provider (direct API, not proxied)
+- Native Google Gemini provider
+- Provider selection per profile
+- Different models for different agent types
+
+---
+
+### 9. Reactive agent mesh
+**Status:** NATS deployed. Message bus on workers exists. No reactive profiles.
+
+**What to build:**
+- Service-mode profiles that stay alive and listen for NATS events
+- Grafana alert → NATS event → monitor agent reacts → spawns investigation
+- Fully automated alert-to-email pipeline without human trigger
+
+---
+
+### 10. Enhanced dashboard
+**Status:** Basic dashboard (workers, tasks, agents, refresh).
+
+**What to build:**
+- Task detail view with output, tool call trace, timing breakdown
+- Real-time event feed via NATS/SSE (currently polling)
+- Submit tasks from the UI
+- Plugin and profile management
+- Cost charts
+- Session viewer for debugging
+
+---
+
+### 11. Marketplace
+**Status:** Not started.
+
+**What to build:**
 - Public registry at registry.bitop.dev
-- `agent plugins search --marketplace`
-- Rating, downloads, verified publishers
-- One-command install: `agent plugins install community/slack-bot`
-
-### Reactive agent mesh
-Long-lived agents that react to events (extends Phase 5d message bus):
-- Monitor agent watches Grafana → detects anomaly
-- Sends message to diagnostic agent
-- Diagnostic investigates → sends message to report agent
-- Report agent compiles findings → sends email
-- All happens automatically without an orchestrator
-
-### Smart routing
-Registry-based task routing that matches tasks to the best available worker:
-- Workers report their installed profiles and current load
-- Registry routes tasks to workers with the right profiles
-- Load-aware: prefer idle workers over busy ones
-- Capability-aware: route grafana tasks to workers with VPN access
-
-### Guardrails and safety
-Production safety controls:
-- Rate limiting per profile, per user, per worker
-- Content filtering on inputs and outputs
-- Maximum task duration enforcement
-- Approval workflows for high-risk tasks (already exists, needs UI)
-- Audit log for compliance
+- Community plugin and profile submissions
+- Rating and download counts
+- Verified publishers
 
 ---
 
-## Priority matrix
+## Completed items (moved from previous roadmap)
 
-| Feature | Value | Effort | Priority |
-|---|---|---|---|
-| Multi-arch plugin builds | High | Medium | 1 |
-| Provider resilience | High | Small | 2 |
-| Worker observability | High | Medium | 3 |
-| Task history | High | Medium | 4 |
-| Plugin config from env | Medium | Small | 5 |
-| Scheduled tasks | High | Medium | 6 |
-| Webhook triggers | High | Medium | 7 |
-| Cost tracking | Medium | Medium | 8 |
-| Web dashboard | High | Large | 9 |
-| Profile inheritance | Medium | Medium | 10 |
-| Agent memory | Medium | Large | 11 |
-| Multi-provider | Medium | Large | 12 |
-| Smart routing | Medium | Large | 13 |
-| Reactive mesh | Medium | Large | 14 |
-| Marketplace | Low | Large | 15 |
+- ~~Scheduled tasks~~ → Gateway v0.1.0
+- ~~Webhook triggers~~ → Gateway v0.1.0
+- ~~Task history~~ → Gateway v0.1.0 (PostgreSQL)
+- ~~Worker observability~~ → Gateway dashboard + NATS events
+- ~~Smart routing~~ → Gateway capability-based routing
+- ~~Web dashboard~~ → Gateway v0.3.0 (embedded)
+- ~~Gateway-level parallel~~ → Gateway v0.3.1
+- ~~Retries~~ → Gateway v0.3.2
