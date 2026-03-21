@@ -181,6 +181,9 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 	}
 	registerWithRegistries(app, workerURL, profileNames, dedup(capabilities))
 
+	// Start reactive triggers for service-mode profiles.
+	startReactiveTriggers(ctx, app)
+
 	server := &http.Server{Addr: addr, Handler: mux}
 
 	// Start heartbeat goroutine.

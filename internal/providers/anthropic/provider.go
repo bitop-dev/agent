@@ -126,6 +126,16 @@ func (p Provider) runMessages(ctx context.Context, baseURL string, req provider.
 			}
 		}
 	}
+
+	// Report usage.
+	if result.Usage.InputTokens > 0 || result.Usage.OutputTokens > 0 {
+		ch <- provider.StreamEvent{
+			Type:         provider.StreamEventDone,
+			InputTokens:  result.Usage.InputTokens,
+			OutputTokens: result.Usage.OutputTokens,
+		}
+	}
+
 	return nil
 }
 
