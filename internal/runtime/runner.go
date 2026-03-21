@@ -111,6 +111,13 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 				if err == nil {
 					break
 				}
+				// Permanent model errors — skip retries, go straight to fallback.
+				errMsg := err.Error()
+				if strings.Contains(errMsg, "Invalid model") || strings.Contains(errMsg, "model not found") ||
+					strings.Contains(errMsg, "does not exist") || strings.Contains(errMsg, "400 Bad Request") {
+					_ = sink.Publish(ctx, events.Event{Type: events.TypeError, Time: time.Now(), Message: fmt.Sprintf("model %s not available, trying fallback", model)})
+					break
+				}
 				if attempt < maxRetries-1 {
 					jitter := time.Duration(rand.Intn(200)) * time.Millisecond
 					delay := time.Duration(math.Pow(2, float64(attempt)))*time.Duration(baseRetryDelayMs)*time.Millisecond + jitter
@@ -126,7 +133,7 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 				usedModel = model
 				break // success with this model
 			}
-			_ = sink.Publish(ctx, events.Event{Type: events.TypeError, Time: time.Now(), Message: fmt.Sprintf("model %s exhausted retries, trying fallback", model)})
+			_ = sink.Publish(ctx, events.Event{Type: events.TypeError, Time: time.Now(), Message: fmt.Sprintf("model %s failed, trying next fallback", model)})
 		}
 		if err != nil {
 			return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, err
