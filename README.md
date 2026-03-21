@@ -88,12 +88,42 @@ External clients see the agent as a single callable tool with the profile's
 name, description, and capabilities. The agent runs its full tool chain
 internally and returns the final output.
 
+## HTTP worker mode
+
+Run as a distributed worker that accepts tasks via HTTP:
+
+```bash
+# Dynamic worker — loads any profile on demand
+agent serve --addr :9898
+
+# With gateway integration — parallel sub-agents distributed across pods
+GATEWAY_URL=http://gateway:8080 agent serve --addr :9898
+```
+
+Workers auto-install profiles and plugins from the registry when a task
+requires them. No pre-configuration needed.
+
+## k8s deployment
+
+Workers start blank in k8s. When a task arrives, the worker pulls the
+profile and plugins from the registry automatically:
+
+```
+Task → Gateway → Worker (blank)
+                   ↓ pulls profile from registry
+                   ↓ pulls plugins from registry
+                   ↓ executes task
+                   → result stored in PostgreSQL
+```
+
 ## Related repos
 
 | Repo | Purpose |
 |---|---|
-| [agent-plugins](https://github.com/bitop-dev/agent-plugins) | Official plugin packages |
-| [agent-registry](https://github.com/bitop-dev/agent-registry) | Plugin registry server |
+| [agent-gateway](https://github.com/bitop-dev/agent-gateway) | Task routing, auth, webhooks, scheduling, dashboard |
+| [agent-registry](https://github.com/bitop-dev/agent-registry) | Plugin + profile package server |
+| [agent-plugins](https://github.com/bitop-dev/agent-plugins) | Plugin packages |
+| [agent-profiles](https://github.com/bitop-dev/agent-profiles) | Agent profile definitions |
 | [agent-docs](https://github.com/bitop-dev/agent-docs) | Full documentation |
 
 ## Development
