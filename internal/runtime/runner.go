@@ -170,26 +170,17 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 				totalOutputTokens += event.OutputTokens
 			}
 		}
-		// If stream errored, check if it's a model-level error that should trigger fallback.
+		// If stream errored with a model-level error, try the next model in the fallback chain.
 		if streamErr != nil {
 			errMsg := streamErr.Error()
 			isModelError := strings.Contains(errMsg, "Invalid model") || strings.Contains(errMsg, "400 Bad Request") ||
 				strings.Contains(errMsg, "model not found") || strings.Contains(errMsg, "does not exist")
 			if isModelError && len(models) > 1 {
-				// Try the next model in the fallback chain by re-running this turn.
 				_ = sink.Publish(ctx, events.Event{Type: events.TypeError, Time: time.Now(), Message: fmt.Sprintf("model error via stream, trying fallback: %s", errMsg)})
-				// Remove the failed model from the chain and retry this turn.
-				var remaining []string
-				for _, m := range models {
-					if m != usedModel && m != models[0] {
-						remaining = append(remaining, m)
-					}
-				}
-				if len(remaining) > 0 {
-					models = remaining
-					turn-- // re-do this turn with the remaining models
-					continue
-				}
+				// Pop the first model off and retry this turn.
+				models = models[1:]
+				turn--
+				continue
 			}
 			return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, streamErr
 		}
