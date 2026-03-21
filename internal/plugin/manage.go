@@ -82,10 +82,12 @@ func Install(source string, sources []config.PluginSource, destinationRoot strin
 	manifestPath, sourceDir, err := resolveSource(source, filtered)
 	if err != nil {
 		// Local resolution failed. Try registry sources before giving up.
-		if result, regErr := installFromRegistry(source, filtered, destinationRoot, opts.Version); regErr == nil {
+		result, regErr := installFromRegistry(source, filtered, destinationRoot, opts.Version)
+		if regErr == nil {
 			return result, nil
 		}
-		return InstallResult{}, err
+		// Show both errors so the real problem is visible.
+		return InstallResult{}, fmt.Errorf("%w (registry also failed: %v)", err, regErr)
 	}
 	manifest, err := loaderutil.LoadYAML[plg.Manifest](manifestPath)
 	if err != nil {
