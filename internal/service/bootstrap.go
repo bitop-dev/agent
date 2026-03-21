@@ -197,11 +197,17 @@ func (a App) installMissingPlugins(missingTools []string) bool {
 		if err != nil {
 			continue
 		}
-		// Enable the plugin in config.
+		// Enable the plugin only if it has no required config that isn't set.
 		cfg, err := config.Load(a.Paths)
 		if err == nil {
-			cfg.SetPluginEnabled(name, true)
 			cfg.SetPluginInstallRecord(name, result.Version, result.Source)
+			// Check if the plugin can be enabled without config.
+			pluginCfg := cfg.Plugins[name]
+			if err := plugin.ValidateConfig(result.Manifest, pluginCfg); err == nil {
+				cfg.SetPluginEnabled(name, true)
+			} else {
+				fmt.Fprintf(os.Stderr, "[on-demand] installed %s but not enabled (needs config: %v)\n", name, err)
+			}
 			config.Save(a.Paths, cfg)
 		}
 		installedAny = true
