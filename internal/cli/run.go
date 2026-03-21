@@ -134,7 +134,11 @@ func serveMCPStdio(ctx context.Context, app service.App, profileRef string) erro
 		Description: manifest.Metadata.Description,
 		InputSchema: toolSchema,
 		Handler: func(toolCtx context.Context, arguments map[string]any) (string, error) {
-			return runTaskForServe(toolCtx, app, profileRef, arguments)
+			sr, err := runTaskForServe(toolCtx, app, profileRef, arguments)
+			if err != nil {
+				return "", err
+			}
+			return sr.Output, nil
 		},
 	}
 
@@ -143,23 +147,31 @@ func serveMCPStdio(ctx context.Context, app service.App, profileRef string) erro
 	return server.Serve(ctx, os.Stdin, os.Stdout)
 }
 
+// serveResult holds the output and usage from a served task.
+type serveResult struct {
+	Output       string
+	Model        string
+	InputTokens  int
+	OutputTokens int
+}
+
 // runTaskForServe executes a task using a named profile. Shared by MCP and HTTP modes.
-func runTaskForServe(ctx context.Context, app service.App, profileRef string, arguments map[string]any) (string, error) {
+func runTaskForServe(ctx context.Context, app service.App, profileRef string, arguments map[string]any) (serveResult, error) {
 	task, _ := arguments["task"].(string)
 	if strings.TrimSpace(task) == "" {
-		return "", errors.New("task is required")
+		return serveResult{}, errors.New("task is required")
 	}
 	m, path, err := app.Profiles.Load(ctx, profileRef)
 	if err != nil {
-		return "", fmt.Errorf("profile %q not found", profileRef)
+		return serveResult{}, fmt.Errorf("profile %q not found", profileRef)
 	}
 	providerImpl, err := app.ResolveProvider(m.Spec.Provider.Default)
 	if err != nil {
-		return "", err
+		return serveResult{}, err
 	}
 	tools, err := app.ResolveTools(m.Spec.Tools.Enabled)
 	if err != nil {
-		return "", err
+		return serveResult{}, err
 	}
 	workspaceRef, _ := workspace.Resolve(app.Paths.CWD)
 	result, err := executeServeRun(ctx, app, runInput{
@@ -173,9 +185,14 @@ func runTaskForServe(ctx context.Context, app service.App, profileRef string, ar
 		CWD:          app.Paths.CWD,
 	})
 	if err != nil {
-		return "", err
+		return serveResult{}, err
 	}
-	return result.Output, nil
+	return serveResult{
+		Output:       result.Output,
+		Model:        result.Model,
+		InputTokens:  result.InputTokens,
+		OutputTokens: result.OutputTokens,
+	}, nil
 }
 
 func runCommand(ctx context.Context, app service.App, args []string) error {

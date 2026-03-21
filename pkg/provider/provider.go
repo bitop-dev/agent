@@ -28,10 +28,12 @@ const (
 )
 
 type StreamEvent struct {
-	Type     StreamEventType
-	Text     string
-	ToolCall tool.Call
-	Err      error
+	Type         StreamEventType
+	Text         string
+	ToolCall     tool.Call
+	Err          error
+	InputTokens  int // set on StreamEventDone if provider reports usage
+	OutputTokens int // set on StreamEventDone if provider reports usage
 }
 
 type CompletionRequest struct {

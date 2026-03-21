@@ -65,6 +65,7 @@ func (p Provider) runChat(ctx context.Context, req provider.CompletionRequest, c
 	if len(tools) > 0 {
 		toolChoice = "auto"
 	}
+	// Request usage reporting in the response.
 	body := chatRequest{
 		Model:      req.Model.Model,
 		Messages:   toChatMessages(req),
@@ -78,6 +79,7 @@ func (p Provider) runChat(ctx context.Context, req provider.CompletionRequest, c
 	return p.streamChat(ctx, body, nameMap, ch)
 }
 
+// streamChat returns (inputTokens, outputTokens, error).
 func (p Provider) streamChat(ctx context.Context, body chatRequest, nameMap map[string]string, ch chan<- provider.StreamEvent) error {
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -137,6 +139,14 @@ func (p Provider) streamChat(ctx context.Context, body chatRequest, nameMap map[
 		}
 		if strings.TrimSpace(message.Content) != "" {
 			ch <- provider.StreamEvent{Type: provider.StreamEventText, Text: message.Content}
+		}
+		// Report usage from non-streaming response.
+		if fallback.Usage.TotalTokens > 0 {
+			ch <- provider.StreamEvent{
+				Type:         provider.StreamEventDone,
+				InputTokens:  fallback.Usage.PromptTokens,
+				OutputTokens: fallback.Usage.CompletionTokens,
+			}
 		}
 		return nil
 	}
@@ -491,6 +501,11 @@ type chatResponse struct {
 			} `json:"tool_calls"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
 type responsesRequest struct {

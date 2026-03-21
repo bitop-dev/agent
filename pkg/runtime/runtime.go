@@ -39,7 +39,10 @@ type RunRequest struct {
 }
 
 type RunResult struct {
-	SessionID  string
-	Output     string
-	Transcript []provider.Message
+	SessionID    string
+	Output       string
+	Transcript   []provider.Message
+	Model        string // which model was actually used
+	InputTokens  int    // total input tokens across all turns
+	OutputTokens int    // total output tokens across all turns
 }

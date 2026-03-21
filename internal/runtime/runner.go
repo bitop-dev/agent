@@ -81,6 +81,8 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 
 	var output strings.Builder
 	var toolHistory []tool.Result
+	var totalInputTokens, totalOutputTokens int
+	var usedModel string
 	const maxTurns = 8
 	const maxRetries = 3
 	const baseRetryDelayMs = 500
@@ -121,6 +123,7 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 				}
 			}
 			if err == nil {
+				usedModel = model
 				break // success with this model
 			}
 			_ = sink.Publish(ctx, events.Event{Type: events.TypeError, Time: time.Now(), Message: fmt.Sprintf("model %s exhausted retries, trying fallback", model)})
@@ -153,6 +156,9 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 				}
 				toolHistory = append(toolHistory, result)
 				toolMessages = append(toolMessages, provider.Message{Role: "tool", Content: result.Output, ToolCallID: event.ToolCall.ID, ToolName: event.ToolCall.ToolID})
+			case provider.StreamEventDone:
+				totalInputTokens += event.InputTokens
+				totalOutputTokens += event.OutputTokens
 			}
 		}
 		assistantMessage := provider.Message{Role: "assistant", Content: assistantText.String(), ToolCalls: assistantToolCalls}
@@ -239,7 +245,14 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 	if err := sink.Publish(ctx, events.Event{Type: events.TypeRunFinished, Time: time.Now(), Message: "run finished", Data: map[string]any{"session_id": sessionID}}); err != nil {
 		return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, err
 	}
-	return pkgruntime.RunResult{SessionID: sessionID, Output: finalOutput, Transcript: append([]provider.Message{}, transcript...)}, nil
+	return pkgruntime.RunResult{
+		SessionID:    sessionID,
+		Output:       finalOutput,
+		Transcript:   append([]provider.Message{}, transcript...),
+		Model:        usedModel,
+		InputTokens:  totalInputTokens,
+		OutputTokens: totalOutputTokens,
+	}, nil
 }
 
 func needsFinalAnswer(transcript []provider.Message) bool {

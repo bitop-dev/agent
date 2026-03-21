@@ -24,12 +24,15 @@ type taskRequest struct {
 }
 
 type taskResponse struct {
-	ID        string  `json:"id"`
-	Status    string  `json:"status"`
-	Output    string  `json:"output,omitempty"`
-	Error     string  `json:"error,omitempty"`
-	SessionID string  `json:"sessionId,omitempty"`
-	Duration  float64 `json:"duration"`
+	ID           string  `json:"id"`
+	Status       string  `json:"status"`
+	Output       string  `json:"output,omitempty"`
+	Error        string  `json:"error,omitempty"`
+	SessionID    string  `json:"sessionId,omitempty"`
+	Duration     float64 `json:"duration"`
+	Model        string  `json:"model,omitempty"`
+	InputTokens  int     `json:"inputTokens,omitempty"`
+	OutputTokens int     `json:"outputTokens,omitempty"`
 }
 
 type agentInfoResponse struct {
@@ -132,7 +135,7 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 			arguments["context"] = req.Context
 		}
 
-		output, err := runTaskForServe(r.Context(), app, profileRef, arguments)
+		sr, err := runTaskForServe(r.Context(), app, profileRef, arguments)
 		duration := time.Since(start).Seconds()
 
 		if err != nil {
@@ -144,9 +147,12 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 			return
 		}
 		writeHTTPJSON(w, http.StatusOK, taskResponse{
-			Status:   "completed",
-			Output:   output,
-			Duration: duration,
+			Status:       "completed",
+			Output:       sr.Output,
+			Model:        sr.Model,
+			InputTokens:  sr.InputTokens,
+			OutputTokens: sr.OutputTokens,
+			Duration:     duration,
 		})
 	})
 
