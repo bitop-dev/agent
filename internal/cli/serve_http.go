@@ -211,7 +211,10 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 
 func resolveWorkerURL(addr string) string {
 	if strings.HasPrefix(addr, ":") {
-		// Try to get the hostname for a better URL.
+		// Prefer pod IP for k8s — hostnames don't resolve across pods.
+		if podIP := os.Getenv("POD_IP"); podIP != "" {
+			return podIP + addr
+		}
 		if host, err := os.Hostname(); err == nil {
 			return host + addr
 		}
