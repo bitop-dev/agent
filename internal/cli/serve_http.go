@@ -173,7 +173,7 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 
 	// Start heartbeat goroutine.
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
