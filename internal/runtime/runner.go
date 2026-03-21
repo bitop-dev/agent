@@ -140,12 +140,14 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 		}
 
 		toolExecuted := false
+		var streamErr error
 		var assistantText strings.Builder
 		var assistantToolCalls []tool.Call
 		var toolMessages []provider.Message
 		for event := range stream {
 			if event.Err != nil {
-				return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, event.Err
+				streamErr = event.Err
+				break // don't return — let the fallback loop handle it
 			}
 			switch event.Type {
 			case provider.StreamEventText:
@@ -168,6 +170,30 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 				totalOutputTokens += event.OutputTokens
 			}
 		}
+		// If stream errored, check if it's a model-level error that should trigger fallback.
+		if streamErr != nil {
+			errMsg := streamErr.Error()
+			isModelError := strings.Contains(errMsg, "Invalid model") || strings.Contains(errMsg, "400 Bad Request") ||
+				strings.Contains(errMsg, "model not found") || strings.Contains(errMsg, "does not exist")
+			if isModelError && len(models) > 1 {
+				// Try the next model in the fallback chain by re-running this turn.
+				_ = sink.Publish(ctx, events.Event{Type: events.TypeError, Time: time.Now(), Message: fmt.Sprintf("model error via stream, trying fallback: %s", errMsg)})
+				// Remove the failed model from the chain and retry this turn.
+				var remaining []string
+				for _, m := range models {
+					if m != usedModel && m != models[0] {
+						remaining = append(remaining, m)
+					}
+				}
+				if len(remaining) > 0 {
+					models = remaining
+					turn-- // re-do this turn with the remaining models
+					continue
+				}
+			}
+			return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, streamErr
+		}
+
 		assistantMessage := provider.Message{Role: "assistant", Content: assistantText.String(), ToolCalls: assistantToolCalls}
 		if assistantMessage.Content != "" || len(assistantMessage.ToolCalls) > 0 {
 			transcript = append(transcript, assistantMessage)

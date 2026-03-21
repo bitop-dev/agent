@@ -53,7 +53,6 @@ func (p Provider) Stream(ctx context.Context, req provider.CompletionRequest) (<
 			ch <- provider.StreamEvent{Err: err}
 			return
 		}
-		ch <- provider.StreamEvent{Type: provider.StreamEventDone}
 	}()
 	return ch, nil
 }
