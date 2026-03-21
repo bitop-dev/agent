@@ -93,12 +93,16 @@ func truncateForDisplay(s string, max int) string {
 }
 
 func (c *RuntimeCapabilities) DiscoverAgents(ctx context.Context) ([]pkghost.AgentInfo, error) {
+	seen := make(map[string]bool)
+	var agents []pkghost.AgentInfo
+
+	// Local profiles first.
 	discovered, err := c.Profiles.Discover(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var agents []pkghost.AgentInfo
 	for _, d := range discovered {
+		seen[d.Manifest.Metadata.Name] = true
 		agents = append(agents, pkghost.AgentInfo{
 			Name:         d.Manifest.Metadata.Name,
 			Version:      d.Manifest.Metadata.Version,
@@ -109,6 +113,43 @@ func (c *RuntimeCapabilities) DiscoverAgents(ctx context.Context) ([]pkghost.Age
 			Tools:        d.Manifest.Spec.Tools.Enabled,
 		})
 	}
+
+	// Also query registry profile indexes for profiles not installed locally.
+	for _, source := range c.Profiles.PluginSources {
+		if !source.Enabled || source.Type != "registry" || source.URL == "" {
+			continue
+		}
+		indexURL := strings.TrimRight(source.URL, "/") + "/v1/profiles/index.json"
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Get(indexURL)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			continue
+		}
+		var index struct {
+			Profiles []struct {
+				Name          string `json:"name"`
+				LatestVersion string `json:"latestVersion"`
+				Description   string `json:"description"`
+			} `json:"profiles"`
+		}
+		json.NewDecoder(resp.Body).Decode(&index)
+		resp.Body.Close()
+		for _, p := range index.Profiles {
+			if seen[p.Name] {
+				continue
+			}
+			seen[p.Name] = true
+			agents = append(agents, pkghost.AgentInfo{
+				Name:        p.Name,
+				Version:     p.LatestVersion,
+				Description: p.Description,
+			})
+		}
+	}
+
 	return agents, nil
 }
 
