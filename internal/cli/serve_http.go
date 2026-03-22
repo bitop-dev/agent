@@ -12,6 +12,7 @@ import (
 
 	"github.com/bitop-dev/agent/internal/service"
 	pkghost "github.com/bitop-dev/agent/pkg/host"
+	pkgruntime "github.com/bitop-dev/agent/pkg/runtime"
 )
 
 // ── HTTP request/response types ───────────────────────────────────────────────
@@ -24,15 +25,16 @@ type taskRequest struct {
 }
 
 type taskResponse struct {
-	ID           string  `json:"id"`
-	Status       string  `json:"status"`
-	Output       string  `json:"output,omitempty"`
-	Error        string  `json:"error,omitempty"`
-	SessionID    string  `json:"sessionId,omitempty"`
-	Duration     float64 `json:"duration"`
-	Model        string  `json:"model,omitempty"`
-	InputTokens  int     `json:"inputTokens,omitempty"`
-	OutputTokens int     `json:"outputTokens,omitempty"`
+	ID           string               `json:"id"`
+	Status       string               `json:"status"`
+	Output       string               `json:"output,omitempty"`
+	Error        string               `json:"error,omitempty"`
+	SessionID    string               `json:"sessionId,omitempty"`
+	Duration     float64              `json:"duration"`
+	Model        string               `json:"model,omitempty"`
+	InputTokens  int                  `json:"inputTokens,omitempty"`
+	OutputTokens int                  `json:"outputTokens,omitempty"`
+	ToolSteps    []pkgruntime.ToolStep `json:"toolSteps,omitempty"`
 }
 
 type agentInfoResponse struct {
@@ -152,6 +154,7 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 			Model:        sr.Model,
 			InputTokens:  sr.InputTokens,
 			OutputTokens: sr.OutputTokens,
+			ToolSteps:    sr.ToolSteps,
 			Duration:     duration,
 		})
 	})

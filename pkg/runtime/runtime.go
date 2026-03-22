@@ -39,11 +39,20 @@ type RunRequest struct {
 	ModelOverride string // If set, overrides profile's model (from config/CLI/env)
 }
 
+type ToolStep struct {
+	Tool      string `json:"tool"`
+	Arguments string `json:"arguments,omitempty"`
+	Result    string `json:"result,omitempty"`
+	Error     string `json:"error,omitempty"`
+	Duration  int    `json:"durationMs,omitempty"`
+}
+
 type RunResult struct {
 	SessionID    string
 	Output       string
 	Transcript   []provider.Message
-	Model        string // which model was actually used
-	InputTokens  int    // total input tokens across all turns
-	OutputTokens int    // total output tokens across all turns
+	Model        string     // which model was actually used
+	InputTokens  int        // total input tokens across all turns
+	OutputTokens int        // total output tokens across all turns
+	ToolSteps    []ToolStep // tool calls executed during the run
 }

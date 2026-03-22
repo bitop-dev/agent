@@ -153,6 +153,7 @@ type serveResult struct {
 	Model        string
 	InputTokens  int
 	OutputTokens int
+	ToolSteps    []pkgruntime.ToolStep
 }
 
 // runTaskForServe executes a task using a named profile. Shared by MCP and HTTP modes.
@@ -193,6 +194,7 @@ func runTaskForServe(ctx context.Context, app service.App, profileRef string, ar
 		Model:        result.Model,
 		InputTokens:  result.InputTokens,
 		OutputTokens: result.OutputTokens,
+		ToolSteps:    result.ToolSteps,
 	}, nil
 }
 

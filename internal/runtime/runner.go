@@ -277,6 +277,20 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 	if err := sink.Publish(ctx, events.Event{Type: events.TypeRunFinished, Time: time.Now(), Message: "run finished", Data: map[string]any{"session_id": sessionID}}); err != nil {
 		return pkgruntime.RunResult{SessionID: sessionID, Transcript: append([]provider.Message{}, transcript...)}, err
 	}
+	// Collect tool steps from history
+	var toolSteps []pkgruntime.ToolStep
+	for _, th := range toolHistory {
+		step := pkgruntime.ToolStep{
+			Tool: th.ToolID,
+		}
+		out := th.Output
+		if len(out) > 200 {
+			out = out[:200] + "..."
+		}
+		step.Result = out
+		toolSteps = append(toolSteps, step)
+	}
+
 	return pkgruntime.RunResult{
 		SessionID:    sessionID,
 		Output:       finalOutput,
@@ -284,6 +298,7 @@ func (Runner) Run(ctx context.Context, req pkgruntime.RunRequest) (pkgruntime.Ru
 		Model:        usedModel,
 		InputTokens:  totalInputTokens,
 		OutputTokens: totalOutputTokens,
+		ToolSteps:    toolSteps,
 	}, nil
 }
 
