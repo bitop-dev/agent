@@ -18,6 +18,7 @@ import (
 // ── HTTP request/response types ───────────────────────────────────────────────
 
 type taskRequest struct {
+	TaskID   string         `json:"taskId"`
 	Profile  string         `json:"profile"`
 	Task     string         `json:"task"`
 	Context  map[string]any `json:"context,omitempty"`
@@ -135,6 +136,9 @@ func serveHTTP(ctx context.Context, app service.App, addr, fixedProfile string) 
 		arguments := map[string]any{"task": req.Task}
 		if len(req.Context) > 0 {
 			arguments["context"] = req.Context
+		}
+		if req.TaskID != "" {
+			arguments["_taskId"] = req.TaskID
 		}
 
 		sr, err := runTaskForServe(r.Context(), app, profileRef, arguments)

@@ -175,6 +175,7 @@ func runTaskForServe(ctx context.Context, app service.App, profileRef string, ar
 		return serveResult{}, err
 	}
 	workspaceRef, _ := workspace.Resolve(app.Paths.CWD)
+	taskID, _ := arguments["_taskId"].(string)
 	result, err := executeServeRun(ctx, app, runInput{
 		Prompt:        task,
 		Manifest:      m,
@@ -185,6 +186,7 @@ func runTaskForServe(ctx context.Context, app service.App, profileRef string, ar
 		NoSession:     true,
 		CWD:           app.Paths.CWD,
 		ModelOverride: config.ResolveModel(app.Config, m.Spec.Provider.Default, m.Metadata.Name, m.Spec.Provider.Model, ""),
+		TaskID:        taskID,
 	})
 	if err != nil {
 		return serveResult{}, err
@@ -1540,6 +1542,7 @@ type runInput struct {
 	NoSession     bool
 	CWD           string
 	ModelOverride string
+	TaskID        string // gateway task ID for event forwarding
 }
 
 type chatState struct {
@@ -1565,7 +1568,11 @@ type sessionView struct {
 // executeServeRun is like executeRun but sends events to stderr instead of stdout.
 // Used by the MCP serve command where stdout is the JSON-RPC protocol pipe.
 func executeServeRun(ctx context.Context, app service.App, input runInput) (pkgruntime.RunResult, error) {
-	eventSink := streamSink{Writer: os.Stderr}
+	var eventSink events.Sink = streamSink{Writer: os.Stderr}
+	// Wrap with gateway forwarding if taskId is available
+	if input.TaskID != "" {
+		eventSink = newGatewayEventSink(eventSink, input.TaskID)
+	}
 	if app.HostCaps != nil {
 		app.HostCaps.Events = eventSink
 	}
