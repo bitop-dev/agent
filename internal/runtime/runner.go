@@ -304,8 +304,16 @@ func needsFinalAnswer(transcript []provider.Message) bool {
 func forceFinalAnswer(ctx context.Context, req pkgruntime.RunRequest, transcript []provider.Message, toolHistory []tool.Result, sink events.Sink) (string, []provider.Message, error) {
 	followUp := provider.Message{Role: "user", Content: "You have enough information now. Do not call tools. Answer the original user question directly, briefly, and confidently."}
 	messages := append(append([]provider.Message{}, transcript...), followUp)
+	// Use the resolved model (same as the main loop)
+	resolvedModel := req.ModelOverride
+	if resolvedModel == "" {
+		resolvedModel = req.Profile.Spec.Provider.Model
+	}
+	if resolvedModel == "" {
+		resolvedModel = "gpt-4o"
+	}
 	stream, err := req.Provider.Stream(ctx, provider.CompletionRequest{
-		Model:    provider.ModelRef{Provider: req.Provider.Name(), Model: req.Profile.Spec.Provider.Model},
+		Model:    provider.ModelRef{Provider: req.Provider.Name(), Model: resolvedModel},
 		System:   req.SystemPrompt,
 		Messages: messages,
 		Tools:    nil,
@@ -340,7 +348,7 @@ func forceFinalAnswerFromEvidence(ctx context.Context, req pkgruntime.RunRequest
 	}
 	prompt := "Answer the original user question directly and concisely using only the collected evidence below. Do not call tools.\n\nCollected evidence:\n" + evidence
 	stream, err := req.Provider.Stream(ctx, provider.CompletionRequest{
-		Model:  provider.ModelRef{Provider: req.Provider.Name(), Model: req.Profile.Spec.Provider.Model},
+		Model:  provider.ModelRef{Provider: req.Provider.Name(), Model: resolveModel(req)},
 		System: req.SystemPrompt,
 		Messages: []provider.Message{
 			{Role: "user", Content: prompt},
@@ -414,6 +422,18 @@ func summarizeEvidenceResult(result tool.Result) string {
 		return "Grep result: " + compactRuntimeText(result.Output, 220)
 	}
 	return "Tool " + result.ToolID + ": " + compactRuntimeText(result.Output, 220)
+}
+
+// resolveModel returns the effective model for a run request,
+// using ModelOverride if set, falling back to profile, then hardcoded default.
+func resolveModel(req pkgruntime.RunRequest) string {
+	if req.ModelOverride != "" {
+		return req.ModelOverride
+	}
+	if req.Profile.Spec.Provider.Model != "" {
+		return req.Profile.Spec.Provider.Model
+	}
+	return "gpt-4o"
 }
 
 func compactRuntimeText(text string, max int) string {
@@ -649,7 +669,7 @@ Conversation to summarize:
 ` + serialised
 
 	stream, err := req.Provider.Stream(ctx, provider.CompletionRequest{
-		Model:    provider.ModelRef{Provider: req.Provider.Name(), Model: req.Profile.Spec.Provider.Model},
+		Model:    provider.ModelRef{Provider: req.Provider.Name(), Model: resolveModel(req)},
 		Messages: []provider.Message{{Role: "user", Content: prompt}},
 		Tools:    nil,
 	})
